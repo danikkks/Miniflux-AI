@@ -1,6 +1,6 @@
 # Miniflux-AI
 
-Automates [Miniflux](https://miniflux.app) feed triage by using OpenAI-powered relevance scoring.
+Use AI to auto-classify [Miniflux](https://miniflux.app) feeds so only the important entries reach you.
 
 ## Quick Start
 - Install dependencies: `npm install`
