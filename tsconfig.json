@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "moduleDetection": "force",
+    "esModuleInterop": true,
+    "verbatimModuleSyntax": true,
+    "sourceMap": true,
+    "lib": ["ES2023"],
+    "types": ["node"],
+  }
+}
