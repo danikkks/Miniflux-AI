@@ -68,7 +68,7 @@ const initSync = async () => {
 
 			if (process.env.LOGGING_LEVEL === "debug")
 				console.debug(
-					`polyticsCategories: ${JSON.stringify(categoriesWithPrompts, null, 2)}`,
+					`categoriesWithPrompts: ${JSON.stringify(categoriesWithPrompts, null, 2)}`,
 				);
 
 			// get feeds
