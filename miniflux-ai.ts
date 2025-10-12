@@ -1,8 +1,10 @@
 import { CronJob } from "cron";
 import { OpenAI } from "openai";
+import { Ollama } from "ollama/dist/index.cjs";
 import { readdir, readFile } from "fs/promises";
 import { resolve, dirname } from "path";
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from "url";
+import { stripHtml } from "string-strip-html";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -10,27 +12,27 @@ const __dirname = dirname(__filename);
 const DEFAULT_PROCESSING_INTERVAL_CRON = "*/1 * * * *";
 
 type IMinifluxPage<T> = {
-	total: number;
-	entries: T[];
+    total: number;
+    entries: T[];
 };
 
 type IMinifluxCategory = {
-	id: string;
-	title: string;
-	user_id: number;
-	hide_globally: boolean;
+    id: string;
+    title: string;
+    user_id: number;
+    hide_globally: boolean;
 };
 
 type IMinifluxFeed = {
-	id: string;
-	category: IMinifluxCategory;
+    id: string;
+    category: IMinifluxCategory;
 };
 
 type IMinifluxEntry = {
-	id: string;
-	title: string;
-	content: string;
-	feed: IMinifluxFeed;
+    id: string;
+    title: string;
+    content: string;
+    feed: IMinifluxFeed;
 };
 
 const initSync = async () => {
@@ -212,28 +214,32 @@ initSync();
  */
 
 async function loadCustomPrompts() {
-	const files = await readdir(__dirname);
-	const customPromptFiles = files.filter(
-		(i) => i.startsWith("custom-prompt-") && i.endsWith(".md"),
-	);
+    const files = await readdir(__dirname);
+    const customPromptFiles = files.filter(
+        (i) => i.startsWith("custom-prompt-") && i.endsWith(".md")
+    );
 
-	const customPromptContent = await Promise.all(
-		customPromptFiles.map((i) =>
-			readFile(resolve(__dirname, i), { encoding: "utf8" }),
-		),
-	).then((i) =>
-		i.flatMap((e, index) => ({
-			category: customPromptFiles[index]
-				.replace(/^custom\-prompt\-/, "")
-				.replace(/\.md$/, ""),
-			content: e,
-		})),
-	);
+    const customPromptContent = await Promise.all(
+        customPromptFiles.map((i) =>
+            readFile(resolve(__dirname, i), { encoding: "utf8" })
+        )
+    ).then((i) =>
+        i.flatMap((e, index) => ({
+            category: customPromptFiles[index]
+                .replace(/^custom\-prompt\-/, "")
+                .replace(/\.md$/, ""),
+            content: e,
+        }))
+    );
 
-	if (process.env.LOGGING_LEVEL === "debug")
-		console.debug(
-			`customPromptContent: ${JSON.stringify(customPromptContent, null, 2)}`,
-		);
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(
+            `customPromptContent: ${JSON.stringify(
+                customPromptContent,
+                null,
+                2
+            )}`
+        );
 
-	return () => customPromptContent;
+    return () => customPromptContent;
 }

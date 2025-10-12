@@ -17,6 +17,8 @@
   },
   "dependencies": {
     "cron": "^4.3.3",
-    "openai": "^5.23.1"
+    "ollama": "^0.5.13",
+    "openai": "^5.23.1",
+    "string-strip-html": "^13.4.13"
   }
 }
