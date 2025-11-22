@@ -35,6 +35,11 @@ type IMinifluxEntry = {
     feed: IMinifluxFeed;
 };
 
+type IDecision = {
+    decision: string;
+    entryId: string;
+};
+
 const initSync = async () => {
     const ollamaAiClient = new Ollama({ host: "http://localhost:11434/" });
     const openAiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -146,7 +151,7 @@ const initSync = async () => {
                     );
 
                 // get ai decisions
-                let aiDecisions;
+                let aiDecisions: IDecision[];
 
                 if (process.env.AI_PROVIDER === "OPENAI") {
                     aiDecisions = await Promise.all(
