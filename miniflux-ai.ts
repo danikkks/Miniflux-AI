@@ -42,10 +42,16 @@ const initSync = async () => {
 
 	const getCustomPrompts = await loadCustomPrompts();
 
+	let isInProgress = false;
+
 	const markIrrelevantArticlesAsReadJob = new CronJob(
 		process.env.PROCESSING_INTERVAL_CRON ||
 			DEFAULT_PROCESSING_INTERVAL_CRON,
 		async () => {
+			if (isInProgress) return;
+
+			isInProgress = true;
+
 			// get categories
 			const categories = await fetch(
 				`${process.env.MINIFLUX_URL}/v1/categories`,
@@ -145,7 +151,7 @@ const initSync = async () => {
 								.toLowerCase()
 								.includes(e.category),
 						).content,
-						input: `# ${i.title}\n${i.content}`,
+						input: `# ${i.title}\n${stripHtml(i.content).result}`,
 					}),
 				),
 			).then((i) =>
@@ -201,6 +207,8 @@ const initSync = async () => {
 						.join("\n")}`,
 				);
 			}
+
+			isInProgress = false;
 		},
 	);
 
