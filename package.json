@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "npx tsc && node --env-file=.env miniflux-ai.js",
+    "build": "npx tsc",
     "inspect": "npx tsc && node --env-file=.env --inspect miniflux-ai.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

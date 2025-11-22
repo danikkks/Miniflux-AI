@@ -59,19 +59,19 @@ const initSync = async () => {
                         headers: new Headers({
                             "X-Auth-Token": process.env.MINIFLUX_AUTH_TOKEN,
                         }),
-                    }
+                    },
                 ).then((i) => i.json() as Promise<IMinifluxCategory[]>);
 
                 if (process.env.LOGGING_LEVEL === "debug")
                     console.debug(
-                        `categories: ${JSON.stringify(categories, null, 2)}`
+                        `categories: ${JSON.stringify(categories, null, 2)}`,
                     );
 
                 const categoriesWithPrompts = categories.filter(
                     (i) =>
                         !!getCustomPrompts().find((e) =>
-                            i.title.toLowerCase().includes(e.category)
-                        )
+                            i.title.toLowerCase().includes(e.category),
+                        ),
                 );
 
                 if (process.env.LOGGING_LEVEL === "debug")
@@ -79,8 +79,8 @@ const initSync = async () => {
                         `polyticsCategories: ${JSON.stringify(
                             categoriesWithPrompts,
                             null,
-                            2
-                        )}`
+                            2,
+                        )}`,
                     );
 
                 // get feeds
@@ -93,14 +93,14 @@ const initSync = async () => {
                                     "X-Auth-Token":
                                         process.env.MINIFLUX_AUTH_TOKEN,
                                 }),
-                            }
-                        )
-                    )
+                            },
+                        ),
+                    ),
                 )
                     .then((i) =>
                         Promise.all(
-                            i.map((e) => e.json() as Promise<IMinifluxFeed[]>)
-                        )
+                            i.map((e) => e.json() as Promise<IMinifluxFeed[]>),
+                        ),
                     )
                     .then((i) => i.flatMap((e) => e));
 
@@ -117,9 +117,9 @@ const initSync = async () => {
                                     "X-Auth-Token":
                                         process.env.MINIFLUX_AUTH_TOKEN,
                                 }),
-                            }
-                        )
-                    )
+                            },
+                        ),
+                    ),
                 )
                     .then((i) =>
                         Promise.all(
@@ -127,9 +127,9 @@ const initSync = async () => {
                                 (e) =>
                                     e.json() as Promise<
                                         IMinifluxPage<IMinifluxEntry>
-                                    >
-                            )
-                        )
+                                    >,
+                            ),
+                        ),
                     )
                     .then((i) => i.flatMap((e) => e.entries));
 
@@ -138,8 +138,8 @@ const initSync = async () => {
                         `unreadEntries: ${JSON.stringify(
                             unreadEntries,
                             null,
-                            2
-                        )}`
+                            2,
+                        )}`,
                     );
 
                 const unreadEntriesToVerify = unreadEntries
@@ -151,8 +151,8 @@ const initSync = async () => {
                         `unreadEntriesToVerify: ${JSON.stringify(
                             unreadEntriesToVerify,
                             null,
-                            2
-                        )}`
+                            2,
+                        )}`,
                     );
 
                 // get ai decisions
@@ -166,54 +166,60 @@ const initSync = async () => {
                                 instructions: getCustomPrompts().find((e) =>
                                     i.feed.category.title
                                         .toLowerCase()
-                                        .includes(e.category)
+                                        .includes(e.category),
                                 ).content,
                                 input: `# ${i.title}\n${i.content}`,
-                            })
-                        )
+                            }),
+                        ),
                     ).then((i) =>
                         Promise.all(
                             i.map((e, index) => ({
                                 decision: e.output_text,
                                 entryId: unreadEntriesToVerify[index].id,
-                            }))
-                        )
+                            })),
+                        ),
                     );
                 } else {
                     aiDecisions = await Promise.all(
                         unreadEntriesToVerify.map((i) => {
                             const prompt = getCustomPrompts().find((e) =>
-                                    i.feed.category.title
-                                        .toLowerCase()
-                                        .includes(e.category)
-                                ).content;
+                                i.feed.category.title
+                                    .toLowerCase()
+                                    .includes(e.category),
+                            ).content;
 
                             return ollamaAiClient.generate({
                                 model: "deepseek-r1:14b",
-                                prompt: `${prompt}\n\n# ${stripHtml(i.title).result}\n${stripHtml(i.content).result}`,
-                                think: true
+                                prompt: `${prompt}\n\n\ ${stripHtml(i.title).result}\n${i.content.length > 1000 ? "" : stripHtml(i.content).result}`,
+                                think: true,
                             });
-                        })
+                        }),
                     ).then((i) =>
                         Promise.all(
                             i.map((e, index) => ({
                                 decision: e.response,
                                 entryId: unreadEntriesToVerify[index].id,
-                            }))
-                        )
+                            })),
+                        ),
                     );
                 }
 
                 if (process.env.LOGGING_LEVEL === "debug")
                     console.debug(
-                        `aiDecisions: ${JSON.stringify(aiDecisions, null, 2)}`
+                        `aiDecisions: ${JSON.stringify(aiDecisions, null, 2)}`,
                     );
 
                 const irrelevantEntryIds = aiDecisions
                     .filter((i) => i.decision.toLowerCase() === "no")
                     .map((i) => i.entryId);
 
-                entriesWithDecision.push(...aiDecisions.map((i) => i.entryId));
+                entriesWithDecision.push(
+                    ...aiDecisions
+                        .filter(
+                            (i) => i.decision == "yes" || i.decision == "no",
+                        )
+                        .map((i) => i.entryId),
+                );
 
                 // mark irrelevant entries as read
                 if (process.env.LOGGING_LEVEL === "debug") {
@@ -221,7 +227,7 @@ const initSync = async () => {
                         `Attempting to skip the following entries:\n${unreadEntries
                             .filter((i) => irrelevantEntryIds.includes(i.id))
                             .map((i) => `- ${i.title}`)
-                            .join("\n")}`
+                            .join("\n")}`,
                     );
                 }
 
@@ -236,7 +242,7 @@ const initSync = async () => {
                             entry_ids: irrelevantEntryIds,
                         },
                         null,
-                        2
+                        2,
                     ),
                 });
 
@@ -245,7 +251,7 @@ const initSync = async () => {
                         `Successfully skipped the following entries:\n${unreadEntries
                             .filter((i) => irrelevantEntryIds.includes(i.id))
                             .map((i) => `- ${i.title}`)
-                            .join("\n")}`
+                            .join("\n")}`,
                     );
                 }
             } catch (exception: any) {
@@ -253,7 +259,7 @@ const initSync = async () => {
             } finally {
                 isInProgress = false;
             }
-        }
+        },
     );
 
     markIrrelevantArticlesAsReadJob.start();
@@ -268,20 +274,20 @@ initSync();
 async function loadCustomPrompts() {
     const files = await readdir(__dirname);
     const customPromptFiles = files.filter(
-        (i) => i.startsWith("custom-prompt-") && i.endsWith(".md")
+        (i) => i.startsWith("custom-prompt-") && i.endsWith(".md"),
     );
 
     const customPromptContent = await Promise.all(
         customPromptFiles.map((i) =>
-            readFile(resolve(__dirname, i), { encoding: "utf8" })
-        )
+            readFile(resolve(__dirname, i), { encoding: "utf8" }),
+        ),
     ).then((i) =>
         i.flatMap((e, index) => ({
             category: customPromptFiles[index]
                 .replace(/^custom\-prompt\-/, "")
                 .replace(/\.md$/, ""),
             content: e,
-        }))
+        })),
     );
 
     if (process.env.LOGGING_LEVEL === "debug")
@@ -289,8 +295,8 @@ async function loadCustomPrompts() {
             `customPromptContent: ${JSON.stringify(
                 customPromptContent,
                 null,
-                2
-            )}`
+                2,
+            )}`,
         );
 
     return () => customPromptContent;
