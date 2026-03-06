@@ -41,8 +41,8 @@ type IDecision = {
 };
 
 const initSync = async () => {
-    const ollamaAiClient = new Ollama({ host: "http://localhost:11434/" });
-    const openAiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const ollamaAiClient = new Ollama({ host: process.env.OLLAMA_BASE_URL });
+    const openAiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
 
     const entriesWithDecision = [];
 
@@ -184,7 +184,7 @@ const initSync = async () => {
                             ).content;
 
                             return ollamaAiClient.generate({
-                                model: "deepseek-r1:14b",
+                                model: process.env.OLLAMA_MODEL,
                                 prompt: `${prompt}\n\n\ ${stripHtml(i.title).result}\n${i.content.length > 1000 ? "" : stripHtml(i.content).result}`,
                                 think: true,
                             });
