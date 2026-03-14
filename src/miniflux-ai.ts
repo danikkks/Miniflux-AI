@@ -10,7 +10,7 @@ type CustomPrompt = { category: string; content: string };
 
 async function loadPrompts(cwd: string): Promise<CustomPrompt[]> {
     const files = await readdir(cwd);
-    return Promise.all(
+    const prompts = await Promise.all(
         files
             .filter((f) => f.startsWith("custom-prompt-") && f.endsWith(".md"))
             .map(async (f) => ({
@@ -18,6 +18,9 @@ async function loadPrompts(cwd: string): Promise<CustomPrompt[]> {
                 content: await readFile(resolve(cwd, f), "utf8"),
             })),
     );
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`customPromptContent: ${JSON.stringify(prompts, null, 2)}`);
+    return prompts;
 }
 
 async function runCycle(
@@ -34,9 +37,15 @@ async function runCycle(
         { headers },
     ).then((r) => r.json());
 
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`categories: ${JSON.stringify(categories, null, 2)}`);
+
     const matchedCategories = categories.filter((c) =>
         prompts.some((p) => c.title.toLowerCase().includes(p.category)),
     );
+
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`categoriesWithPrompts: ${JSON.stringify(matchedCategories, null, 2)}`);
 
     const feeds: { id: string; category: { title: string } }[] = (
         await Promise.all(
@@ -45,6 +54,9 @@ async function runCycle(
             ),
         )
     ).flat();
+
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`feeds: ${JSON.stringify(feeds, null, 2)}`);
 
     const entries: { id: string; title: string; content: string; feed: { category: { title: string } } }[] = (
         await Promise.all(
@@ -57,9 +69,15 @@ async function runCycle(
         )
     ).flatMap((page: { entries: any[] }) => page.entries);
 
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`unreadEntries: ${JSON.stringify(entries, null, 2)}`);
+
     const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE || "10");
     const newIds = new Set(storage.filterNewKeys(entries.map((e) => e.id)));
     const batch = entries.filter((e) => newIds.has(e.id)).slice(0, batchSize);
+
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`unreadEntriesToVerify: ${JSON.stringify(batch, null, 2)}`);
 
     const decisions = await Promise.all(
         batch.map(async (entry) => {
@@ -85,20 +103,45 @@ async function runCycle(
         }),
     );
 
+    if (process.env.LOGGING_LEVEL === "debug")
+        console.debug(`aiDecisions: ${JSON.stringify(decisions, null, 2)}`);
+
     storage.setMany(
         decisions
             .filter((d) => d.decision === "yes" || d.decision === "no")
             .map((d) => ({ key: d.id, value: d.decision })),
     );
 
+    const irrelevantEntryIds = decisions
+        .filter((d) => d.decision.toLowerCase().includes("no"))
+        .map((d) => d.id);
+
+    if (process.env.LOGGING_LEVEL === "debug") {
+        console.debug(
+            `Attempting to skip the following entries:\n${entries
+                .filter((e) => irrelevantEntryIds.includes(e.id))
+                .map((e) => `- ${e.title}`)
+                .join("\n")}`,
+        );
+    }
+
     await fetch(`${url}/v1/entries`, {
         method: "PUT",
         headers,
         body: JSON.stringify({
             status: "read",
-            entry_ids: decisions.filter((d) => d.decision.toLowerCase().includes("no")).map((d) => d.id),
+            entry_ids: irrelevantEntryIds,
         }),
     });
+
+    if (process.env.LOGGING_LEVEL === "debug") {
+        console.debug(
+            `Successfully skipped the following entries:\n${entries
+                .filter((e) => irrelevantEntryIds.includes(e.id))
+                .map((e) => `- ${e.title}`)
+                .join("\n")}`,
+        );
+    }
 
     return batch.length;
 }
