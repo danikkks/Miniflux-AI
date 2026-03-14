@@ -8,7 +8,7 @@
     "start": "npx tsc && node dist/miniflux-ai.js",
     "build": "npx tsc",
     "inspect": "npx tsc && node --inspect dist/miniflux-ai.js",
-    "test": "npx tsc && node --test dist/storage.test.js"
+    "test": "npx tsc && node --test dist/storage.test.js dist/miniflux-ai.test.js"
   },
   "author": "",
   "license": "ISC",
@@ -17,7 +17,6 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "cron": "^4.3.3",
     "ollama": "^0.6.3",
     "openai": "^5.23.1",
     "string-strip-html": "^13.4.13"
