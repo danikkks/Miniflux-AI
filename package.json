@@ -5,10 +5,10 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "npx tsc && node miniflux-ai.js",
+    "start": "npx tsc && node dist/miniflux-ai.js",
     "build": "npx tsc",
-    "inspect": "npx tsc && node --inspect miniflux-ai.js",
-    "test": "npx tsc && node --test storage.test.js"
+    "inspect": "npx tsc && node --inspect dist/miniflux-ai.js",
+    "test": "npx tsc && node --test dist/storage.test.js"
   },
   "author": "",
   "license": "ISC",

@@ -2,13 +2,9 @@ import { CronJob } from "cron";
 import { OpenAI } from "openai";
 import { Ollama } from "ollama/dist/index.cjs";
 import { readdir, readFile } from "fs/promises";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { resolve } from "path";
 import { stripHtml } from "string-strip-html";
 import { createStorage } from "./storage.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 const DEFAULT_PROCESSING_INTERVAL_CRON = "*/1 * * * *";
 
@@ -45,7 +41,7 @@ const initSync = async () => {
     const ollamaAiClient = new Ollama({ host: process.env.OLLAMA_BASE_URL });
     const openAiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
 
-    const storage = createStorage(__dirname);
+    const storage = createStorage(process.cwd());
 
     const getCustomPrompts = await loadCustomPrompts();
 
@@ -271,14 +267,14 @@ initSync();
  */
 
 async function loadCustomPrompts() {
-    const files = await readdir(__dirname);
+    const files = await readdir(process.cwd());
     const customPromptFiles = files.filter(
         (i) => i.startsWith("custom-prompt-") && i.endsWith(".md"),
     );
 
     const customPromptContent = await Promise.all(
         customPromptFiles.map((i) =>
-            readFile(resolve(__dirname, i), { encoding: "utf8" }),
+            readFile(resolve(process.cwd(), i), { encoding: "utf8" }),
         ),
     ).then((i) =>
         i.flatMap((e, index) => ({

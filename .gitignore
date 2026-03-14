@@ -1,6 +1,7 @@
 node_modules
+.claude
 .env
 custom-prompt-**
-**.js**
+dist/
 AGENTS.md
 logs.txt
