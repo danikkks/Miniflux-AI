@@ -24,16 +24,16 @@ export function createStorage(dir: string) {
                 .get(key);
         },
 
-        filterNewKeys(keys: string[]): string[] {
+        filterNewKeys(keys: string[], ttlSeconds = 86400): string[] {
             if (keys.length === 0) return [];
             const placeholders = keys.map(() => "?").join(",");
             const existing = new Set(
                 (
                     db
                         .prepare(
-                            `select key from kv_store where key in (${placeholders})`,
+                            `select key from kv_store where key in (${placeholders}) and (unixepoch() - created_at) < ?`,
                         )
-                        .all(...keys) as { key: string }[]
+                        .all(...keys, ttlSeconds) as { key: string }[]
                 ).map((r) => r.key),
             );
             return keys.filter((k) => !existing.has(k));

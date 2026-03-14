@@ -111,7 +111,7 @@ async function runCycle(
         .map((d) => d.id);
 
     storage.setMany(
-        irrelevantEntryIds.map((id) => ({ key: id, value: "no" })),
+        decisions.map((d) => ({ key: d.id, value: d.decision })),
     );
 
     if (process.env.LOGGING_LEVEL === "debug") {
