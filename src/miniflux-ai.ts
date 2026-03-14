@@ -106,15 +106,13 @@ async function runCycle(
     if (process.env.LOGGING_LEVEL === "debug")
         console.debug(`aiDecisions: ${JSON.stringify(decisions, null, 2)}`);
 
-    storage.setMany(
-        decisions
-            .filter((d) => d.decision === "yes" || d.decision === "no")
-            .map((d) => ({ key: d.id, value: d.decision })),
-    );
-
     const irrelevantEntryIds = decisions
         .filter((d) => d.decision.toLowerCase().includes("no"))
         .map((d) => d.id);
+
+    storage.setMany(
+        irrelevantEntryIds.map((id) => ({ key: id, value: "no" })),
+    );
 
     if (process.env.LOGGING_LEVEL === "debug") {
         console.debug(
