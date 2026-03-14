@@ -8,7 +8,7 @@
     "start": "npx tsc && node miniflux-ai.js",
     "build": "npx tsc",
     "inspect": "npx tsc && node --inspect miniflux-ai.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npx tsc && node --test storage.test.js"
   },
   "author": "",
   "license": "ISC",

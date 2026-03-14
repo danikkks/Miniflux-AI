@@ -5,6 +5,7 @@ import { readdir, readFile } from "fs/promises";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { stripHtml } from "string-strip-html";
+import { createStorage } from "./storage.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -44,7 +45,7 @@ const initSync = async () => {
     const ollamaAiClient = new Ollama({ host: process.env.OLLAMA_BASE_URL });
     const openAiClient = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
 
-    const entriesWithDecision = [];
+    const storage = createStorage(__dirname);
 
     const getCustomPrompts = await loadCustomPrompts();
 
@@ -141,8 +142,11 @@ const initSync = async () => {
                         `unreadEntries: ${JSON.stringify(unreadEntries, null, 2)}`,
                     );
 
+                const newIds = new Set(
+                    storage.filterNewKeys(unreadEntries.map((i) => i.id)),
+                );
                 const unreadEntriesToVerify = unreadEntries
-                    .filter((i) => !entriesWithDecision.includes(i.id))
+                    .filter((i) => newIds.has(i.id))
                     .slice(0, parseInt(process.env.PROCESSING_BATCH_SIZE));
 
                 if (process.env.LOGGING_LEVEL === "debug")
@@ -208,12 +212,12 @@ const initSync = async () => {
                     .filter((i) => i.decision.toLowerCase().includes("no"))
                     .map((i) => i.entryId);
 
-                entriesWithDecision.push(
-                    ...aiDecisions
+                storage.setMany(
+                    aiDecisions
                         .filter(
                             (i) => i.decision == "yes" || i.decision == "no",
                         )
-                        .map((i) => i.entryId),
+                        .map((i) => ({ key: i.entryId, value: i.decision })),
                 );
 
                 // mark irrelevant entries as read
