@@ -1,5 +1,5 @@
 FROM node:lts-alpine
 WORKDIR /app
 COPY . .
-RUN npm install
-CMD ["npm", "run", "start"]
+RUN npm install && npm run build
+CMD ["/bin/sh", "-c", "while true; do node miniflux-ai.js; sleep ${PROCESSING_INTERVAL_SECONDS:-300}; done"]

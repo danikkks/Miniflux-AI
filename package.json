@@ -17,7 +17,6 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "cron": "^4.3.3",
     "ollama": "^0.6.3",
     "openai": "^5.23.1",
     "string-strip-html": "^13.4.13"
