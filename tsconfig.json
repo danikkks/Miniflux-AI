@@ -9,7 +9,11 @@
     "sourceMap": true,
     "lib": ["ES2023", "ES6", "DOM"],
     "types": ["node"],
+    "rootDir": "src",
+    "outDir": "."
   },
 
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules"],
+
+  "include": ["src"]
 }
