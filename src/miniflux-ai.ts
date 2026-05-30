@@ -5,57 +5,14 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { stripHtml } from "string-strip-html";
 import {
-    type ICategory,
-    type IFeed,
-    type IEntry,
-    type IFeedReader,
     type IAIClassifier,
-    type IEntryUpdater,
     type IPromptLoader,
     run,
 } from "./core.js";
+import { makeMinifluxClient } from "./miniflux.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const minifluxHeaders = () =>
-    new Headers({ "X-Auth-Token": process.env.MINIFLUX_AUTH_TOKEN });
-
-const feedReader: IFeedReader = {
-    getCategories: async () => {
-        const r = await fetch(`${process.env.MINIFLUX_URL}/v1/categories`, {
-            headers: minifluxHeaders(),
-        });
-        return r.json() as Promise<ICategory[]>;
-    },
-
-    getFeedsByCategory: async (categoryId) => {
-        const r = await fetch(
-            `${process.env.MINIFLUX_URL}/v1/categories/${categoryId}/feeds`,
-            { headers: minifluxHeaders() },
-        );
-        return r.json() as Promise<IFeed[]>;
-    },
-
-    getUnreadEntries: async (feedId) => {
-        const r = await fetch(
-            `${process.env.MINIFLUX_URL}/v1/feeds/${feedId}/entries?status=unread&order=published_at&direction=asc&limit=100`,
-            { headers: minifluxHeaders() },
-        );
-        const page = await (r.json() as Promise<{ entries: IEntry[] }>);
-        return page.entries;
-    },
-};
-
-const entryUpdater: IEntryUpdater = {
-    markAsRead: async (entryIds) => {
-        await fetch(`${process.env.MINIFLUX_URL}/v1/entries`, {
-            method: "PUT",
-            headers: minifluxHeaders(),
-            body: JSON.stringify({ status: "read", entry_ids: entryIds }),
-        });
-    },
-};
 
 const promptLoader: IPromptLoader = {
     load: async () => {
@@ -106,6 +63,10 @@ const makeAIClassifier = (): IAIClassifier => {
 };
 
 (async () => {
+    const miniflux = makeMinifluxClient(
+        process.env.MINIFLUX_URL,
+        process.env.MINIFLUX_AUTH_TOKEN,
+    );
     const classifier = makeAIClassifier();
     const processedIds: string[] = [];
     const intervalMs =
@@ -114,7 +75,7 @@ const makeAIClassifier = (): IAIClassifier => {
 
     while (true) {
         try {
-            await run(feedReader, promptLoader, classifier, entryUpdater, processedIds, batchSize);
+            await run(miniflux, promptLoader, classifier, miniflux, processedIds, batchSize);
         } catch (err) {
             console.error(err);
         }
