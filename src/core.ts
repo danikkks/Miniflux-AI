@@ -22,7 +22,7 @@ type IDecision = {
     decision: string;
 };
 
-type ICustomPrompt = {
+export type ICustomPrompt = {
     category: string;
     content: string;
 };

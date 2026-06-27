@@ -1,38 +1,9 @@
 import { OpenAI } from "openai";
 import { Ollama } from "ollama/dist/index.cjs";
-import { readdir, readFile } from "fs/promises";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
 import { stripHtml } from "string-strip-html";
-import {
-    type IAIClassifier,
-    type IPromptLoader,
-    run,
-} from "./core.js";
+import { type IAIClassifier, run } from "./core.js";
 import { makeMinifluxClient } from "./miniflux.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const promptLoader: IPromptLoader = {
-    load: async () => {
-        const files = await readdir(__dirname);
-        const promptFiles = files.filter(
-            (f) => f.startsWith("custom-prompt-") && f.endsWith(".md"),
-        );
-        const contents = await Promise.all(
-            promptFiles.map((f) =>
-                readFile(resolve(__dirname, f), { encoding: "utf8" }),
-            ),
-        );
-        return contents.map((content, i) => ({
-            category: promptFiles[i]
-                .replace(/^custom-prompt-/, "")
-                .replace(/\.md$/, ""),
-            content,
-        }));
-    },
-};
+import { promptLoader } from "./prompt-loader.js";
 
 const makeAIClassifier = (): IAIClassifier => {
     if (process.env.AI_PROVIDER === "OPENAI") {
