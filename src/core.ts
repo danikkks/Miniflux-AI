@@ -70,7 +70,7 @@ const findPromptForEntry = (
 
 const irrelevantEntryIds = (decisions: IDecision[]): string[] =>
     decisions
-        .filter((d) => d.decision.toLowerCase().includes("no"))
+        .filter((d) => d.decision.toLowerCase().trim() === "no")
         .map((d) => d.entryId);
 
 const decidedEntryIds = (decisions: IDecision[]): string[] =>

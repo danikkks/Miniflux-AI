@@ -23,7 +23,7 @@ export const makeAIClassifier = (): IAIClassifier => {
         classify: async (entry, prompt) => {
             const r = await client.generate({
                 model: process.env.OLLAMA_MODEL,
-                prompt: `${prompt}\n\n ${stripHtml(entry.title).result}\n${entry.content.length > 1000 ? "" : stripHtml(entry.content).result}`,
+                prompt: `${prompt}\n\n ${stripHtml(entry.title).result}\n${entry.content.length > 1000 ? stripHtml(entry.content).result : ""}`,
                 think: true,
             });
             return r.response;
