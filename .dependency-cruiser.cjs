@@ -2,6 +2,15 @@
 module.exports = {
     forbidden: [
         {
+            name: "no-imports-bootstrap",
+            comment:
+                "src/bootstrap.ts must not be imported by any module. " +
+                "It is the application entry point and should only be run directly.",
+            severity: "error",
+            from: {},
+            to: { path: "^src/bootstrap\\.ts$" },
+        },
+        {
             name: "no-test-imports-src",
             comment:
                 "test/* must not import from src/*. " +
