@@ -22,6 +22,18 @@ module.exports = {
             to: { path: "^src/" },
         },
         {
+            name: "no-runtime-imports-core",
+            comment:
+                "Only src/bootstrap.ts may import runtime exports from src/core.ts. " +
+                "Other modules must use 'import type { ... }' to keep core.ts dependency injection clean.",
+            severity: "error",
+            from: { pathNot: "^src/bootstrap\\.ts$" },
+            to: {
+                path: "^src/core\\.ts$",
+                dependencyTypesNot: ["type-only"],
+            },
+        },
+        {
             name: "no-core-imports-src",
             comment:
                 "src/core.ts must not import from src/*. " +

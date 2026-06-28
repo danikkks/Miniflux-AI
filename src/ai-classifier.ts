@@ -1,7 +1,7 @@
 import { OpenAI } from "openai";
 import { Ollama } from "ollama/dist/index.cjs";
 import { stripHtml } from "string-strip-html";
-import { type IAIClassifier } from "./core.js";
+import type { IAIClassifier } from "./core.js";
 
 export const makeAIClassifier = (): IAIClassifier => {
     if (process.env.AI_PROVIDER === "OPENAI") {

@@ -1,9 +1,9 @@
-import {
-    type ICategory,
-    type IFeed,
-    type IEntry,
-    type IFeedReader,
-    type IEntryUpdater,
+import type {
+    ICategory,
+    IFeed,
+    IEntry,
+    IFeedReader,
+    IEntryUpdater,
 } from "./core.js";
 
 export const makeMinifluxClient = (
