@@ -34,6 +34,16 @@ module.exports = {
             },
         },
         {
+            name: "no-impl-to-impl",
+            comment:
+                "Implementation modules must not import from each other. " +
+                "To fix: if shared behaviour is needed, define a new interface in core.ts " +
+                "and inject the dependency via bootstrap.ts.",
+            severity: "error",
+            from: { path: "^src/", pathNot: "^src/(core|bootstrap)\\.ts$" },
+            to: { path: "^src/", pathNot: "^src/core\\.ts$" },
+        },
+        {
             name: "no-core-imports-src",
             comment:
                 "src/core.ts must not import from src/*. " +
