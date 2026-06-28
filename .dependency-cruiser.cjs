@@ -16,7 +16,7 @@ module.exports = {
             name: "no-core-imports-src",
             comment:
                 "src/core.ts must not import from src/*. " +
-                "To fix: move the dependency into the caller (e.g. miniflux-ai.ts) and pass it " +
+                "To fix: move the dependency into the caller (e.g. bootstrap.ts) and pass it " +
                 "into core via dependency injection. core.ts must stay pure - only node_modules allowed.",
             severity: "error",
             from: { path: "^src/core\\.ts$" },
