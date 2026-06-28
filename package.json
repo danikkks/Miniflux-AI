@@ -5,9 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "npx tsc && node miniflux-ai.js",
+    "start": "npx tsc && node bootstrap.js",
     "build": "npx tsc",
-    "inspect": "npx tsc && node --inspect miniflux-ai.js",
+    "inspect": "npx tsc && node --inspect bootstrap.js",
     "lint": "depcruise --output-type err-long src test",
     "test": "npm run build && tsx --test test/integration.test.ts"
   },

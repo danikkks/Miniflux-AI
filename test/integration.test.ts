@@ -26,7 +26,7 @@ const baseEnv = () => ({
 });
 
 const spawnApp = () =>
-    spawn('node', ['miniflux-ai.js'], {
+    spawn('node', ['bootstrap.js'], {
         cwd: ROOT,
         env: { ...process.env, ...baseEnv() },
         stdio: 'pipe',

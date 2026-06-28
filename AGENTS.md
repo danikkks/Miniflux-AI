@@ -23,7 +23,7 @@ src/
   miniflux.ts       -- Miniflux REST API client
   ai-classifier.ts  -- IAIClassifier implementations (Ollama + OpenAI)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
-  miniflux-ai.ts    -- entry point: wires providers, runs the loop
+  bootstrap.ts      -- entry point: wires providers, runs the loop
 test/
   integration.test.ts  -- black-box integration tests
   mockserver.ts        -- MockServer helpers (startServer, waitFor, json)
@@ -33,7 +33,7 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 
 ### Data flow
 
-`miniflux-ai.ts` builds concrete implementations of the interfaces defined in `core.ts`, then delegates to `run()`:
+`bootstrap.ts` builds concrete implementations of the interfaces defined in `core.ts`, then delegates to `run()`:
 
 1. Load `custom-prompt-<category>.md` files from the compiled output directory
 2. Fetch Miniflux categories; keep only those whose titles contain a prompt's `<category>` (case-insensitive substring)
@@ -66,7 +66,7 @@ Files named `custom-prompt-<category>.md` placed in the project root (where JS i
 ### Philosophy
 
 - Write integration tests only — never unit tests unless explicitly asked
-- Tests must be black-box: spawn the compiled `miniflux-ai.js` as a child process, configure it via environment variables, and assert on observable HTTP behavior. No imports from `src/`
+- Tests must be black-box: spawn the compiled `bootstrap.js` as a child process, configure it via environment variables, and assert on observable HTTP behavior. No imports from `src/`
 - Mock external HTTP APIs (Miniflux, Ollama) with a real mock HTTP server — not SDK mocks or in-process stubs
 - Each test sets up its own mock expectations independently, even at the cost of some duplication. Shared stubs reduce flexibility
 
