@@ -25,10 +25,10 @@ const baseEnv = () => ({
     PROCESSING_BATCH_SIZE: '10',
 });
 
-const spawnApp = () =>
+const spawnApp = (env: Record<string, string> = {}) =>
     spawn('node', ['bootstrap.js'], {
         cwd: ROOT,
-        env: { ...process.env, ...baseEnv() },
+        env: { ...process.env, ...baseEnv(), ...env },
         stdio: 'pipe',
     });
 
@@ -73,6 +73,39 @@ test('entry classified as "yes" is not marked as read', async () => {
     const req = await waitFor(mock, 'PUT', '/v1/entries');
     const body = JSON.parse(req.body.string);
     assert.deepEqual(body.entry_ids, []);
+});
+
+test('decision api: entry classified as "no" is marked as read', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['decision'] }));
+    await mock.mockAnyResponse(json('POST', '/v1/systemone', 200, {
+        model: 'nimble:latest',
+        answers: { relevant: { type: 'noul', noul: 0.1 } },
+        usage: { input_tokens: 1, output_tokens: 1 },
+    }));
+
+    child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
+    const req = await waitFor(mock, 'PUT', '/v1/entries');
+    const body = JSON.parse(req.body.string);
+    assert.deepEqual(body.entry_ids, [ENTRY.id]);
+    assert.equal(body.status, 'read');
+});
+
+test('decision api: model missing "decision" capability is never marked as read', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['completion'] }));
+
+    child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
+    await waitFor(mock, 'POST', '/api/show');
+    await new Promise((r) => setTimeout(r, 300));
+    const putRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    assert.equal(putRequests.length, 0);
 });
 
 test('category without matching prompt - no feeds fetched', async () => {
