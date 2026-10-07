@@ -2,12 +2,15 @@ import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { writeFile, unlink } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { PROMPT, CATEGORY, FEED, ENTRY } from './fixtures.js';
 import { createClient, startServer, waitFor, json } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
+
+const DB_FILE = resolve(ROOT, 'test-miniflux-ai.db');
 
 const PORT = 18080;
 const mock = createClient(PORT);
@@ -23,6 +26,7 @@ const baseEnv = () => ({
     AI_PROVIDER: 'OLLAMA',
     PROCESSING_INTERVAL_SECONDS: '999',
     PROCESSING_BATCH_SIZE: '10',
+    DATABASE_PATH: DB_FILE,
 });
 
 const spawnApp = (env: Record<string, string> = {}) =>
@@ -39,12 +43,14 @@ before(async () => {
 
 beforeEach(async () => {
     child?.kill();
+    await unlink(DB_FILE).catch(() => {});
     await mock.reset();
 });
 
 after(async () => {
     child?.kill();
     await unlink(PROMPT_FILE).catch(() => {});
+    await unlink(DB_FILE).catch(() => {});
     mockProcess?.kill();
 });
 
@@ -60,6 +66,38 @@ test('entry classified as "no" is marked as read', async () => {
     const body = JSON.parse(req.body.string);
     assert.deepEqual(body.entry_ids, [ENTRY.id]);
     assert.equal(body.status, 'read');
+});
+
+test('entry classified as "no" is stored in sqlite', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const db = new DatabaseSync(DB_FILE, { readOnly: true });
+    const rows = db.prepare('select entry_id, title, url, category from skipped_entries').all();
+    db.close();
+    assert.deepEqual(rows.map((r) => ({ ...r })), [
+        { entry_id: ENTRY.id, title: ENTRY.title, url: ENTRY.url, category: CATEGORY.title },
+    ]);
+});
+
+test('entry classified as "yes" is not stored in sqlite', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const db = new DatabaseSync(DB_FILE, { readOnly: true });
+    const rows = db.prepare('select entry_id from skipped_entries').all();
+    db.close();
+    assert.equal(rows.length, 0);
 });
 
 test('entry classified as "yes" is not marked as read', async () => {

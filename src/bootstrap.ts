@@ -2,6 +2,7 @@ import { run } from "./core.js";
 import { makeMinifluxClient } from "./miniflux.js";
 import { promptLoader } from "./prompt-loader.js";
 import { makeAIClassifier } from "./ai-classifier.js";
+import { makeSqliteDatabase } from "./sqlite-database.js";
 
 (async () => {
     const miniflux = makeMinifluxClient(
@@ -9,6 +10,9 @@ import { makeAIClassifier } from "./ai-classifier.js";
         process.env.MINIFLUX_AUTH_TOKEN,
     );
     const classifier = makeAIClassifier();
+    const database = makeSqliteDatabase(
+        process.env.DATABASE_PATH || "miniflux-ai.db",
+    );
     const processedIds: string[] = [];
     const intervalMs =
         parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
@@ -16,7 +20,7 @@ import { makeAIClassifier } from "./ai-classifier.js";
 
     while (true) {
         try {
-            await run(miniflux, promptLoader, classifier, miniflux, processedIds, batchSize);
+            await run(miniflux, promptLoader, classifier, miniflux, database, processedIds, batchSize);
         } catch (err) {
             console.error(err);
         }

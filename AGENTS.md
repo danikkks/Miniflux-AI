@@ -22,6 +22,7 @@ src/
   core.ts           -- domain interfaces + run() pipeline
   miniflux.ts       -- Miniflux REST API client
   ai-classifier.ts  -- IAIClassifier implementations (Ollama + OpenAI)
+  sqlite-database.ts -- IDatabase implementation (node:sqlite)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
   bootstrap.ts      -- entry point: wires providers, runs the loop
 test/
@@ -48,6 +49,7 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 | `IFeedReader` | `makeMinifluxClient()` in `miniflux.ts` |
 | `IEntryUpdater` | `makeMinifluxClient()` in `miniflux.ts` |
 | `IAIClassifier` | `makeAIClassifier()` in `ai-classifier.ts` |
+| `IDatabase` | `makeSqliteDatabase()` in `sqlite-database.ts` |
 | `IPromptLoader` | `promptLoader` in `prompt-loader.ts` |
 
 ### AI providers
@@ -108,4 +110,5 @@ test/
 | `OLLAMA_MODEL` | if Ollama | - | Ollama model name |
 | `PROCESSING_INTERVAL_SECONDS` | no | 300 | Seconds between runs |
 | `PROCESSING_BATCH_SIZE` | no | - | Max entries processed per run |
+| `DATABASE_PATH` | no | miniflux-ai.db | SQLite database file |
 | `LOGGING_LEVEL` | no | - | `info` or `debug` |

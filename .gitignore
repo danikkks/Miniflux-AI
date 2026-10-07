@@ -4,3 +4,5 @@ custom-prompt-**
 **.js**
 logs.txt
 *.jar
+*.db
+data

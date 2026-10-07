@@ -13,6 +13,7 @@ export type IFeed = {
 export type IEntry = {
     id: string;
     title: string;
+    url: string;
     content: string;
     feed: IFeed;
 };
@@ -39,6 +40,10 @@ export interface IAIClassifier {
 
 export interface IEntryUpdater {
     markAsRead(entryIds: string[]): Promise<void>;
+}
+
+export interface IDatabase {
+    saveSkippedEntries(entries: IEntry[]): Promise<void>;
 }
 
 export interface IPromptLoader {
@@ -83,6 +88,7 @@ export const run = async (
     promptLoader: IPromptLoader,
     classifier: IAIClassifier,
     entryUpdater: IEntryUpdater,
+    database: IDatabase,
     processedIds: string[],
     batchSize: number,
 ): Promise<void> => {
@@ -120,10 +126,12 @@ export const run = async (
     console.debug("aiDecisions", decisions);
 
     const toSkip = irrelevantEntryIds(decisions);
-    console.debug("skipping", unreadEntries.filter((e) => toSkip.includes(e.id)).map((e) => e.title));
+    const skipped = unreadEntries.filter((e) => toSkip.includes(e.id));
+    console.debug("skipping", skipped.map((e) => e.title));
 
+    await database.saveSkippedEntries(skipped);
     await entryUpdater.markAsRead(toSkip);
-    console.debug("skipped", unreadEntries.filter((e) => toSkip.includes(e.id)).map((e) => e.title));
+    console.debug("skipped", skipped.map((e) => e.title));
 
     processedIds.push(...decidedEntryIds(decisions));
 };
