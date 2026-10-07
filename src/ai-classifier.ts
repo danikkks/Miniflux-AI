@@ -5,6 +5,12 @@ import type { IAIClassifier, IEntry } from "./core.js";
 
 const DECISION_CAPABILITY = "decision";
 const DECISION_QUESTION_KEY = "relevant";
+// /v1/systemone rejects requests over 8194 tokens and never truncates input itself.
+// chars-per-token is an average-English approximation; dense scripts (CJK, etc.) use fewer chars per token,
+// so the margin below is intentionally generous rather than exact.
+const SYSTEMONE_TOKEN_LIMIT = 8194;
+const CHARS_PER_TOKEN = 4;
+const SYSTEMONE_MAX_CHARS = (SYSTEMONE_TOKEN_LIMIT - 1000) * CHARS_PER_TOKEN;
 
 // capability string returned by `ollama show`, not the model name or api path
 export const supportsDecisionApi = async (client: Ollama, model: string): Promise<boolean> => {
@@ -13,9 +19,13 @@ export const supportsDecisionApi = async (client: Ollama, model: string): Promis
 };
 
 const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEntry, prompt: string): Promise<string> => {
+    const title = stripHtml(entry.title).result;
+    const body = entry.content.length > 1000 ? stripHtml(entry.content).result : "";
+    const stateBudget = Math.max(0, SYSTEMONE_MAX_CHARS - prompt.length);
+
     const r = await client.systemone({
         model,
-        state: `${stripHtml(entry.title).result}\n${entry.content.length > 1000 ? stripHtml(entry.content).result : ""}`,
+        state: `${title}\n${body}`.slice(0, stateBudget),
         questions: {
             [DECISION_QUESTION_KEY]: { type: "noul", instructions: prompt },
         },
