@@ -1,6 +1,7 @@
 import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
@@ -13,6 +14,8 @@ const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
 const DB_FILE = resolve(ROOT, 'test-miniflux-ai.db');
 
 const PORT = 18080;
+const WEB_PORT = 18081;
+const WEB = `http://localhost:${WEB_PORT}`;
 const mock = createClient(PORT);
 
 let mockProcess: any;
@@ -27,6 +30,7 @@ const baseEnv = () => ({
     PROCESSING_INTERVAL_SECONDS: '999',
     PROCESSING_BATCH_SIZE: '10',
     DATABASE_PATH: DB_FILE,
+    WEB_PORT: String(WEB_PORT),
 });
 
 const spawnApp = (env: Record<string, string> = {}) =>
@@ -42,7 +46,11 @@ before(async () => {
 });
 
 beforeEach(async () => {
-    child?.kill();
+    if (child && child.exitCode === null) {
+        const exited = once(child, 'exit');
+        child.kill();
+        await exited;
+    }
     await unlink(DB_FILE).catch(() => {});
     await mock.reset();
 });
@@ -155,4 +163,60 @@ test('category without matching prompt - no feeds fetched', async () => {
     await waitFor(mock, 'PUT', '/v1/entries');
     const feedsRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'GET', path: `/v1/categories/${sportsCategory.id}/feeds` })) ?? [];
     assert.equal(feedsRequests.length, 0);
+});
+
+test('review ui: marking a decision wrong yields a prompt-tweak text for the category', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+
+    const pending = await (await fetch(WEB)).text();
+    assert.match(pending, new RegExp(ENTRY.title));
+
+    const review = await fetch(`${WEB}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['reviewed', String(ENTRY.id)], ['wrong', String(ENTRY.id)]]),
+    });
+    const prompt = await review.text();
+    assert.ok(prompt.includes(PROMPT.content));
+    assert.match(prompt, /Wrong decisions \(1\)/);
+    assert.match(prompt, /classifier answered: no \| correct answer: yes/);
+
+    const stillPending = await (await fetch(`${WEB}/pending`)).text();
+    assert.match(stillPending, new RegExp(ENTRY.title));
+    assert.match(stillPending, /name="wrong" value="100" checked/);
+
+    await fetch(`${WEB}/reviewed`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['reviewed', String(ENTRY.id)]]),
+    });
+    const after = await (await fetch(`${WEB}/pending`)).text();
+    assert.doesNotMatch(after, new RegExp(ENTRY.title));
+});
+
+test('review ui: decision not marked wrong is reported as correct', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+
+    const review = await fetch(`${WEB}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['reviewed', String(ENTRY.id)]]),
+    });
+    const prompt = await review.text();
+    assert.match(prompt, /Wrong decisions \(0\)/);
+    assert.match(prompt, /Correct decisions \(1\)/);
 });

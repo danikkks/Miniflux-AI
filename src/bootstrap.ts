@@ -1,8 +1,9 @@
-import { run } from "./core.js";
+import { run, makeReviewService } from "./core.js";
 import { makeMinifluxClient } from "./miniflux.js";
 import { promptLoader } from "./prompt-loader.js";
 import { makeAIClassifier } from "./ai-classifier.js";
 import { makeSqliteDatabase } from "./sqlite-database.js";
+import { startWebUi } from "./web-ui.js";
 
 (async () => {
     const miniflux = makeMinifluxClient(
@@ -14,6 +15,10 @@ import { makeSqliteDatabase } from "./sqlite-database.js";
         process.env.DATABASE_PATH || "miniflux-ai.db",
     );
     const processedIds: string[] = [];
+    startWebUi(
+        makeReviewService(database, promptLoader),
+        parseInt(process.env.WEB_PORT || "3000"),
+    );
     const intervalMs =
         parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
     const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE);

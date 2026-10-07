@@ -19,9 +19,10 @@ This is a TypeScript/Node.js ESM service that polls Miniflux for unread feed ent
 
 ```
 src/
-  core.ts           -- domain interfaces + run() pipeline
+  core.ts           -- domain types, interfaces (ports), run() pipeline, makeReviewService()
   miniflux.ts       -- Miniflux REST API client
   ai-classifier.ts  -- IAIClassifier implementations (Ollama + OpenAI)
+  web-ui.ts         -- inbound adapter: htmx review UI (node:http), depends on IReviewService
   sqlite-database.ts -- IDatabase implementation (node:sqlite)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
   bootstrap.ts      -- entry point: wires providers, runs the loop
@@ -34,13 +35,17 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 
 ### Data flow
 
-`bootstrap.ts` builds concrete implementations of the interfaces defined in `core.ts`, then delegates to `run()`:
+`bootstrap.ts` builds concrete implementations of the interfaces defined in `core.ts`, then delegates to `run()` and serves the review UI:
 
 1. Load `custom-prompt-<category>.md` files from the compiled output directory
 2. Fetch Miniflux categories; keep only those whose titles contain a prompt's `<category>` (case-insensitive substring)
 3. Fetch unread entries for matching feeds, skip already-processed IDs, apply `PROCESSING_BATCH_SIZE`
 4. Classify each entry via AI; response "no" (exact, trimmed) -> mark as read, "yes" -> leave unread
 5. Save all decisions (yes and no) to the database, then add all decided entry IDs to the in-memory `processedIds` list to prevent re-processing
+
+### Review UI
+
+`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user ticks the wrong ones. Step 2 stores verdicts (`correct`/`wrong`) and shows, per category, a copyable prompt; pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. The user applies the result to the prompt file manually.
 
 ### Interfaces (`core.ts`)
 
@@ -50,6 +55,7 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 | `IEntryUpdater` | `makeMinifluxClient()` in `miniflux.ts` |
 | `IAIClassifier` | `makeAIClassifier()` in `ai-classifier.ts` |
 | `IDatabase` | `makeSqliteDatabase()` in `sqlite-database.ts` |
+| `IReviewService` | `makeReviewService()` in `core.ts`, consumed by `web-ui.ts` |
 | `IPromptLoader` | `promptLoader` in `prompt-loader.ts` |
 
 ### AI providers
@@ -111,4 +117,5 @@ test/
 | `PROCESSING_INTERVAL_SECONDS` | no | 300 | Seconds between runs |
 | `PROCESSING_BATCH_SIZE` | no | - | Max entries processed per run |
 | `DATABASE_PATH` | no | miniflux-ai.db | SQLite database file |
+| `WEB_PORT` | no | 3000 | Port of the review UI |
 | `LOGGING_LEVEL` | no | - | `info` or `debug` |
