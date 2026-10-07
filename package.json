@@ -22,7 +22,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
-    "ollama": "^0.6.3",
+    "ollama": "^0.6.4",
     "openai": "^5.23.1",
     "string-strip-html": "^13.4.13"
   }
