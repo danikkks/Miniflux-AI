@@ -10,7 +10,7 @@ Use AI to auto-classify [Miniflux](https://miniflux.app) feeds so only the impor
   - `MINIFLUX_AUTH_TOKEN`: Personal access token for Miniflux API calls.
   - `PROCESSING_INTERVAL_SECONDS`: How often filtering job should run (default: 300).
   - `PROCESSING_BATCH_SIZE`: Maximum unread entries processed each run.
-  - `DATABASE_PATH`: Optional SQLite file path for persisted data such as skipped articles (default: `miniflux-ai.db`).
+  - `DATABASE_PATH`: Optional SQLite file path for persisted data such as AI decisions on articles (default: `miniflux-ai.db`).
   - `LOGGING_LEVEL`: Optional verbosity level such as `info` or `debug`.
   - `OLLAMA_DECISION_API`: Set to `true` to classify entries with Ollama's decision api (`ollama.systemone`) instead of `generate`. Requires a model whose `ollama show` capabilities include `decision`.
 - Run the script: `npm run start`

@@ -68,7 +68,7 @@ test('entry classified as "no" is marked as read', async () => {
     assert.equal(body.status, 'read');
 });
 
-test('entry classified as "no" is stored in sqlite', async () => {
+test('entry classified as "no" is stored in sqlite with its decision', async () => {
     await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
     await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
     await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
@@ -78,14 +78,14 @@ test('entry classified as "no" is stored in sqlite', async () => {
     child = spawnApp();
     await waitFor(mock, 'PUT', '/v1/entries');
     const db = new DatabaseSync(DB_FILE, { readOnly: true });
-    const rows = db.prepare('select entry_id, title, url, category from skipped_entries').all();
+    const rows = db.prepare('select entry_id, title, url, category, decision from decisions').all();
     db.close();
     assert.deepEqual(rows.map((r) => ({ ...r })), [
-        { entry_id: ENTRY.id, title: ENTRY.title, url: ENTRY.url, category: CATEGORY.title },
+        { entry_id: ENTRY.id, title: ENTRY.title, url: ENTRY.url, category: CATEGORY.title, decision: 'no' },
     ]);
 });
 
-test('entry classified as "yes" is not stored in sqlite', async () => {
+test('entry classified as "yes" is stored in sqlite with its decision', async () => {
     await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
     await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
     await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
@@ -95,9 +95,9 @@ test('entry classified as "yes" is not stored in sqlite', async () => {
     child = spawnApp();
     await waitFor(mock, 'PUT', '/v1/entries');
     const db = new DatabaseSync(DB_FILE, { readOnly: true });
-    const rows = db.prepare('select entry_id from skipped_entries').all();
+    const rows = db.prepare('select entry_id, decision from decisions').all();
     db.close();
-    assert.equal(rows.length, 0);
+    assert.deepEqual(rows.map((r) => ({ ...r })), [{ entry_id: ENTRY.id, decision: 'yes' }]);
 });
 
 test('entry classified as "yes" is not marked as read', async () => {

@@ -40,7 +40,7 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 2. Fetch Miniflux categories; keep only those whose titles contain a prompt's `<category>` (case-insensitive substring)
 3. Fetch unread entries for matching feeds, skip already-processed IDs, apply `PROCESSING_BATCH_SIZE`
 4. Classify each entry via AI; response "no" (exact, trimmed) -> mark as read, "yes" -> leave unread
-5. Add all decided entry IDs to the in-memory `processedIds` list to prevent re-processing
+5. Save all decisions (yes and no) to the database, then add all decided entry IDs to the in-memory `processedIds` list to prevent re-processing
 
 ### Interfaces (`core.ts`)
 

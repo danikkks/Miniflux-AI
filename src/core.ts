@@ -18,8 +18,8 @@ export type IEntry = {
     feed: IFeed;
 };
 
-type IDecision = {
-    entryId: string;
+export type IDecision = {
+    entry: IEntry;
     decision: string;
 };
 
@@ -43,7 +43,7 @@ export interface IEntryUpdater {
 }
 
 export interface IDatabase {
-    saveSkippedEntries(entries: IEntry[]): Promise<void>;
+    saveDecisions(decisions: IDecision[]): Promise<void>;
 }
 
 export interface IPromptLoader {
@@ -76,12 +76,10 @@ const findPromptForEntry = (
 const irrelevantEntryIds = (decisions: IDecision[]): string[] =>
     decisions
         .filter((d) => d.decision.toLowerCase().trim() === "no")
-        .map((d) => d.entryId);
+        .map((d) => d.entry.id);
 
-const decidedEntryIds = (decisions: IDecision[]): string[] =>
-    decisions
-        .filter((d) => d.decision === "yes" || d.decision === "no")
-        .map((d) => d.entryId);
+const validDecisions = (decisions: IDecision[]): IDecision[] =>
+    decisions.filter((d) => d.decision === "yes" || d.decision === "no");
 
 export const run = async (
     feedReader: IFeedReader,
@@ -118,7 +116,7 @@ export const run = async (
         toVerify.map(async (entry) => {
             const prompt = findPromptForEntry(entry, prompts);
             return {
-                entryId: entry.id,
+                entry,
                 decision: await classifier.classify(entry, prompt.content),
             };
         }),
@@ -129,9 +127,10 @@ export const run = async (
     const skipped = unreadEntries.filter((e) => toSkip.includes(e.id));
     console.debug("skipping", skipped.map((e) => e.title));
 
-    await database.saveSkippedEntries(skipped);
+    const valid = validDecisions(decisions);
+    await database.saveDecisions(valid);
     await entryUpdater.markAsRead(toSkip);
     console.debug("skipped", skipped.map((e) => e.title));
 
-    processedIds.push(...decidedEntryIds(decisions));
+    processedIds.push(...valid.map((d) => d.entry.id));
 };
