@@ -5,12 +5,18 @@ import type { IAIClassifier, IEntry } from "./core.js";
 
 const DECISION_CAPABILITY = "decision";
 const DECISION_QUESTION_KEY = "relevant";
-// /v1/systemone rejects requests over 8194 tokens and never truncates input itself.
-// chars-per-token is an average-English approximation; dense scripts (CJK, etc.) use fewer chars per token,
-// so the margin below is intentionally generous rather than exact.
+// /v1/systemone rejects requests over this many tokens and never truncates input itself.
+// chars-per-token varies by script/content, so we can't size the truncation up front; instead
+// we retry using the actual token count the server reports on overflow.
 const SYSTEMONE_TOKEN_LIMIT = 8194;
-const CHARS_PER_TOKEN = 4;
-const SYSTEMONE_MAX_CHARS = (SYSTEMONE_TOKEN_LIMIT - 1000) * CHARS_PER_TOKEN;
+const SYSTEMONE_TOKEN_TARGET = SYSTEMONE_TOKEN_LIMIT * 0.9;
+const SYSTEMONE_MAX_ATTEMPTS = 3;
+
+const overflowTokenCount = (err: unknown): number | null => {
+    const message = err instanceof Error ? err.message : "";
+    const match = /has (\d+) tokens/.exec(message);
+    return match ? Number(match[1]) : null;
+};
 
 // capability string returned by `ollama show`, not the model name or api path
 export const supportsDecisionApi = async (client: Ollama, model: string): Promise<boolean> => {
@@ -21,17 +27,27 @@ export const supportsDecisionApi = async (client: Ollama, model: string): Promis
 const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEntry, prompt: string): Promise<string> => {
     const title = stripHtml(entry.title).result;
     const body = entry.content.length > 1000 ? stripHtml(entry.content).result : "";
-    const stateBudget = Math.max(0, SYSTEMONE_MAX_CHARS - prompt.length);
+    let state = `${title}\n${body}`;
 
-    const r = await client.systemone({
-        model,
-        state: `${title}\n${body}`.slice(0, stateBudget),
-        questions: {
-            [DECISION_QUESTION_KEY]: { type: "noul", instructions: prompt },
-        },
-    });
-    const answer = r.answers[DECISION_QUESTION_KEY];
-    return answer.type === "noul" && answer.noul >= 0.5 ? "yes" : "no";
+    for (let attempt = 1; attempt <= SYSTEMONE_MAX_ATTEMPTS; attempt++) {
+        try {
+            const r = await client.systemone({
+                model,
+                state,
+                questions: {
+                    [DECISION_QUESTION_KEY]: { type: "noul", instructions: prompt },
+                },
+            });
+            const answer = r.answers[DECISION_QUESTION_KEY];
+            return answer.type === "noul" && answer.noul >= 0.5 ? "yes" : "no";
+        } catch (err) {
+            const actualTokens = overflowTokenCount(err);
+            if (actualTokens === null || attempt === SYSTEMONE_MAX_ATTEMPTS) throw err;
+            // recalibrate the truncation from the server's own token count instead of guessing chars-per-token
+            state = state.slice(0, Math.floor(state.length * (SYSTEMONE_TOKEN_TARGET / actualTokens)));
+        }
+    }
+    throw new Error("unreachable");
 };
 
 export const makeAIClassifier = (): IAIClassifier => {
