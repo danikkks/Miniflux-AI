@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
-import { PROMPT, CATEGORY, FEED, ENTRY } from './fixtures.js';
+import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2 } from './fixtures.js';
 import { createClient, startServer, waitFor, json } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -219,4 +219,31 @@ test('review ui: decision not marked wrong is reported as correct', async () => 
     const prompt = await review.text();
     assert.match(prompt, /Wrong decisions \(0\)/);
     assert.match(prompt, /Correct decisions \(1\)/);
+});
+
+test('review ui: prompt includes decisions reviewed in earlier rounds', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY, ENTRY_2] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+
+    const post = (path: string, params: string[][]) =>
+        fetch(`${WEB}${path}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(params),
+        });
+
+    await post('/review', [['reviewed', String(ENTRY.id)], ['wrong', String(ENTRY.id)]]);
+    await post('/reviewed', [['reviewed', String(ENTRY.id)]]);
+
+    const second = await (await post('/review', [['reviewed', String(ENTRY_2.id)]])).text();
+    assert.ok(second.includes(ENTRY.title));
+    assert.ok(second.includes(ENTRY_2.title));
+    assert.match(second, /Wrong decisions \(1\)/);
+    assert.match(second, /Correct decisions \(1\)/);
 });

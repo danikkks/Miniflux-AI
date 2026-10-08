@@ -45,7 +45,7 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 
 ### Review UI
 
-`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user ticks the wrong ones. Step 2 stores verdicts (`correct`/`wrong`) and shows, per category, a copyable prompt; pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. The user applies the result to the prompt file manually.
+`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user ticks the wrong ones. Step 2 stores verdicts (`correct`/`wrong`) and shows, per category, a copyable prompt built from the last 1000 verdicts in that category (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. The user applies the result to the prompt file manually.
 
 ### Interfaces (`core.ts`)
 

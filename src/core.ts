@@ -75,6 +75,7 @@ export interface IDatabase {
     saveDecisions(decisions: IDecision[]): Promise<void>;
     listUnreviewedDecisions(): Promise<IStoredDecision[]>;
     getDecisions(entryIds: string[]): Promise<IStoredDecision[]>;
+    listRecentVerdicts(category: string, limit: number): Promise<IStoredDecision[]>;
     saveVerdicts(verdicts: IVerdict[]): Promise<void>;
     markReviewed(entryIds: string[]): Promise<void>;
 }
@@ -173,6 +174,7 @@ export const run = async (
 };
 
 const EXCERPT_LENGTH = 400;
+const REVIEW_HISTORY_SIZE = 1000;
 
 const toReviewItem = ({ content, ...rest }: IStoredDecision): IReviewItem => ({
     ...rest,
@@ -197,7 +199,7 @@ const buildTweakPrompt = (prompt: string, items: IReviewItem[]): string => {
     const correct = items.filter((i) => i.verdict === "correct");
     return `I use an AI classifier to filter RSS articles. It receives the prompt below as instructions, plus an article title and body as input, and answers "yes" (relevant, keep unread) or "no" (irrelevant, mark as read).
 
-I reviewed some of its decisions. Please tweak the prompt so the classifier stops making the wrong decisions while keeping the correct ones. Return the full improved prompt, then a short list of what you changed and why.
+I reviewed its decisions (up to the last ${REVIEW_HISTORY_SIZE} in this category). Please tweak the prompt so the classifier stops making the wrong decisions while keeping the correct ones. Return the full improved prompt, then a short list of what you changed and why.
 
 <current_prompt>
 ${prompt}
@@ -227,22 +229,23 @@ export const makeReviewService = (
             })),
         );
 
-        const items = (await database.getDecisions(shownIds)).map(toReviewItem);
+        const shown = (await database.getDecisions(shownIds)).map(toReviewItem);
         const prompts = await promptLoader.load();
-        const categories = [...new Set(items.map((i) => i.category))];
+        const categories = [...new Set(shown.map((i) => i.category))];
 
-        return categories.flatMap((category) => {
+        const result = await Promise.all(categories.map(async (category) => {
             const prompt = findPromptForCategory(category, prompts);
-            if (!prompt) return [];
-            const categoryItems = items.filter((i) => i.category === category);
-            return [
-                {
-                    category,
-                    text: buildTweakPrompt(prompt.content, categoryItems),
-                    entryIds: categoryItems.map((i) => i.entryId),
-                },
-            ];
-        });
+            if (!prompt) return null;
+            const history = (
+                await database.listRecentVerdicts(category, REVIEW_HISTORY_SIZE)
+            ).map(toReviewItem);
+            return {
+                category,
+                text: buildTweakPrompt(prompt.content, history),
+                entryIds: shown.filter((i) => i.category === category).map((i) => i.entryId),
+            };
+        }));
+        return result.filter((p): p is IReviewPrompt => p !== null);
     },
 
     markReviewed: (entryIds) => database.markReviewed(entryIds),

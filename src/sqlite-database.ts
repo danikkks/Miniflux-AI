@@ -33,6 +33,7 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
             category text not null,
             decision text not null,
             verdict text,
+            verdict_at text,
             reviewed integer not null default 0,
             decided_at text not null default current_timestamp
         )
@@ -40,6 +41,10 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
     const columns = db.prepare("pragma table_info(decisions)").all();
     if (!columns.some((c) => c.name === "verdict")) {
         db.exec("alter table decisions add column verdict text");
+    }
+    if (!columns.some((c) => c.name === "verdict_at")) {
+        db.exec("alter table decisions add column verdict_at text");
+        db.exec("update decisions set verdict_at = decided_at where verdict is not null");
     }
     if (!columns.some((c) => c.name === "reviewed")) {
         db.exec("alter table decisions add column reviewed integer not null default 0");
@@ -55,7 +60,7 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
             decision = excluded.decision,
             decided_at = current_timestamp
     `);
-    const setVerdict = db.prepare("update decisions set verdict = ? where entry_id = ?");
+    const setVerdict = db.prepare("update decisions set verdict = ?, verdict_at = current_timestamp where entry_id = ?");
     const selectColumns = "entry_id, title, url, content, category, decision, verdict";
 
     return {
@@ -76,6 +81,11 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
                 .prepare(`select ${selectColumns} from decisions where entry_id in (${placeholders})`)
                 .all(...entryIds) as Row[]).map(toStoredDecision);
         },
+
+        listRecentVerdicts: async (category, limit) =>
+            (db
+                .prepare(`select ${selectColumns} from decisions where category = ? and verdict is not null order by verdict_at desc, entry_id desc limit ?`)
+                .all(category, limit) as Row[]).map(toStoredDecision),
 
         markReviewed: async (entryIds) => {
             const placeholders = entryIds.map(() => "?").join(",");
