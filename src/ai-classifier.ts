@@ -11,6 +11,23 @@ const DECISION_QUESTION_KEY = "relevant";
 const SYSTEMONE_TOKEN_LIMIT = 8194;
 const SYSTEMONE_TOKEN_TARGET = SYSTEMONE_TOKEN_LIMIT * 0.9;
 const SYSTEMONE_MAX_ATTEMPTS = 3;
+// /v1/systemone answers 413 above this request body size
+const SYSTEMONE_BODY_LIMIT_BYTES = 64 * 1024 * 0.9;
+
+const systemoneRequest = (model: string, state: string, prompt: string) => ({
+    model,
+    state,
+    questions: {
+        [DECISION_QUESTION_KEY]: { type: "noul" as const, instructions: prompt },
+    },
+});
+
+// every removed char drops at least one byte from the json body, so one slice is enough
+const fitToBodyLimit = (model: string, state: string, prompt: string): string => {
+    const size = Buffer.byteLength(JSON.stringify(systemoneRequest(model, state, prompt)));
+    const excess = size - SYSTEMONE_BODY_LIMIT_BYTES;
+    return excess > 0 ? state.slice(0, Math.max(0, state.length - Math.ceil(excess))) : state;
+};
 
 const overflowTokenCount = (err: unknown): number | null => {
     const message = err instanceof Error ? err.message : "";
@@ -27,17 +44,11 @@ export const supportsDecisionApi = async (client: Ollama, model: string): Promis
 const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEntry, prompt: string): Promise<string> => {
     const title = stripHtml(entry.title).result;
     const body = entry.content.length > 1000 ? stripHtml(entry.content).result : "";
-    let state = `${title}\n${body}`;
+    let state = fitToBodyLimit(model, `${title}\n${body}`, prompt);
 
     for (let attempt = 1; attempt <= SYSTEMONE_MAX_ATTEMPTS; attempt++) {
         try {
-            const r = await client.systemone({
-                model,
-                state,
-                questions: {
-                    [DECISION_QUESTION_KEY]: { type: "noul", instructions: prompt },
-                },
-            });
+            const r = await client.systemone(systemoneRequest(model, state, prompt));
             const answer = r.answers[DECISION_QUESTION_KEY];
             return answer.type === "noul" && answer.noul >= 0.5 ? "yes" : "no";
         } catch (err) {

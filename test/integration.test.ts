@@ -247,3 +247,23 @@ test('review ui: prompt includes decisions reviewed in earlier rounds', async ()
     assert.match(second, /Wrong decisions \(1\)/);
     assert.match(second, /Correct decisions \(1\)/);
 });
+
+test('decision api: oversized entry is truncated to fit the 64 KiB request limit', async () => {
+    const hugeEntry = { ...ENTRY, content: 'x'.repeat(200_000) };
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [hugeEntry] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['decision'] }));
+    await mock.mockAnyResponse(json('POST', '/v1/systemone', 200, {
+        model: 'nimble:latest',
+        answers: { relevant: { type: 'noul', noul: 0.1 } },
+        usage: { input_tokens: 1, output_tokens: 1 },
+    }));
+
+    child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const [req]: any[] = await mock.retrieveRecordedRequests({ method: 'POST', path: '/v1/systemone' });
+    const size = Number(req.headers['content-length'][0]);
+    assert.ok(size <= 64 * 1024, `request body was ${size} bytes`);
+});
