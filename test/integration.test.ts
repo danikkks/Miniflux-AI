@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
-import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2 } from './fixtures.js';
+import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3 } from './fixtures.js';
 import { createClient, startServer, waitFor, json } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
@@ -266,4 +266,32 @@ test('decision api: oversized entry is truncated to fit the 64 KiB request limit
     const [req]: any[] = await mock.retrieveRecordedRequests({ method: 'POST', path: '/v1/systemone' });
     const size = Number(req.headers['content-length'][0]);
     assert.ok(size <= 64 * 1024, `request body was ${size} bytes`);
+});
+
+test('review ui: subcategories share one prompt with their parent category', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY, SUB_CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${SUB_CATEGORY.id}/feeds`, 200, [SUB_FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${SUB_FEED.id}/entries`, 200, { entries: [ENTRY_3] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+
+    const review = await fetch(`${WEB}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([
+            ['reviewed', String(ENTRY.id)],
+            ['reviewed', String(ENTRY_3.id)],
+            ['wrong', String(ENTRY_3.id)],
+        ]),
+    });
+    const html = await review.text();
+    assert.equal(html.match(/<textarea/g)?.length, 1);
+    assert.ok(html.includes(ENTRY.title));
+    assert.ok(html.includes(ENTRY_3.title));
+    assert.match(html, /<h3>Technology News<\/h3>/);
 });

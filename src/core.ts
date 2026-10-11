@@ -75,7 +75,7 @@ export interface IDatabase {
     saveDecisions(decisions: IDecision[]): Promise<void>;
     listUnreviewedDecisions(): Promise<IStoredDecision[]>;
     getDecisions(entryIds: string[]): Promise<IStoredDecision[]>;
-    listRecentVerdicts(category: string, limit: number): Promise<IStoredDecision[]>;
+    listRecentVerdicts(parentCategory: string, limit: number): Promise<IStoredDecision[]>;
     saveVerdicts(verdicts: IVerdict[]): Promise<void>;
     markReviewed(entryIds: string[]): Promise<void>;
 }
@@ -173,6 +173,12 @@ export const run = async (
     processedIds.push(...valid.map((d) => d.entry.id));
 };
 
+// miniflux categories are flat; "Parent / Child" naming is treated as nesting
+const SUBCATEGORY_SEPARATOR = " / ";
+
+const parentCategory = (title: string): string =>
+    title.split(SUBCATEGORY_SEPARATOR)[0];
+
 const EXCERPT_LENGTH = 400;
 const REVIEW_HISTORY_SIZE = 1000;
 
@@ -199,7 +205,7 @@ const buildTweakPrompt = (prompt: string, items: IReviewItem[]): string => {
     const correct = items.filter((i) => i.verdict === "correct");
     return `I use an AI classifier to filter RSS articles. It receives the prompt below as instructions, plus an article title and body as input, and answers "yes" (relevant, keep unread) or "no" (irrelevant, mark as read).
 
-I reviewed its decisions (up to the last ${REVIEW_HISTORY_SIZE} in this category). Please tweak the prompt so the classifier stops making the wrong decisions while keeping the correct ones. Return the full improved prompt, then a short list of what you changed and why.
+I reviewed its decisions (up to the last ${REVIEW_HISTORY_SIZE} in this category and its subcategories). Please tweak the prompt so the classifier stops making the wrong decisions while keeping the correct ones. Return the full improved prompt, then a short list of what you changed and why.
 
 <current_prompt>
 ${prompt}
@@ -231,18 +237,18 @@ export const makeReviewService = (
 
         const shown = (await database.getDecisions(shownIds)).map(toReviewItem);
         const prompts = await promptLoader.load();
-        const categories = [...new Set(shown.map((i) => i.category))];
+        const parents = [...new Set(shown.map((i) => parentCategory(i.category)))];
 
-        const result = await Promise.all(categories.map(async (category) => {
-            const prompt = findPromptForCategory(category, prompts);
+        const result = await Promise.all(parents.map(async (parent) => {
+            const prompt = findPromptForCategory(parent, prompts);
             if (!prompt) return null;
             const history = (
-                await database.listRecentVerdicts(category, REVIEW_HISTORY_SIZE)
+                await database.listRecentVerdicts(parent, REVIEW_HISTORY_SIZE)
             ).map(toReviewItem);
             return {
-                category,
+                category: parent,
                 text: buildTweakPrompt(prompt.content, history),
-                entryIds: shown.filter((i) => i.category === category).map((i) => i.entryId),
+                entryIds: shown.filter((i) => parentCategory(i.category) === parent).map((i) => i.entryId),
             };
         }));
         return result.filter((p): p is IReviewPrompt => p !== null);
