@@ -52,6 +52,28 @@ export type IReviewPrompt = {
     entryIds: string[];
 };
 
+export type IGroupedEntry = {
+    entryId: string;
+    title: string;
+    url: string;
+    content: string;
+};
+
+export type IGroupSummary = {
+    title: string;
+    description: string;
+};
+
+export type IGroup = {
+    id: string;
+    entries: IGroupedEntry[];
+    updatedAt: string;
+    // generated after grouping; null until then
+    summary: IGroupSummary | null;
+    // number of entries the summary was generated from
+    summarizedCount: number;
+};
+
 export type ICustomPrompt = {
     category: string;
     content: string;
@@ -78,6 +100,23 @@ export interface IDatabase {
     listRecentVerdicts(parentCategory: string, limit: number): Promise<IStoredDecision[]>;
     saveVerdicts(verdicts: IVerdict[]): Promise<void>;
     markReviewed(entryIds: string[]): Promise<void>;
+}
+
+export interface IGroupStore {
+    // groups updated within the last `hours`, most recently updated first
+    listGroupsSince(hours: number): Promise<IGroup[]>;
+    groupedEntryIds(entryIds: string[]): Promise<string[]>;
+    // a null groupId starts a new group; returns the id of the group the entry joined
+    addToGroup(groupId: string | null, entry: IEntry): Promise<string>;
+    saveSummary(groupId: string, summary: IGroupSummary, entryCount: number): Promise<void>;
+}
+
+export interface IGroupSummarizer {
+    summarize(group: IGroup): Promise<IGroupSummary>;
+}
+
+export interface IFeedPublisher {
+    publish(groups: IGroup[]): Promise<void>;
 }
 
 export interface IPromptLoader {
@@ -167,10 +206,95 @@ export const run = async (
 
     const valid = validDecisions(decisions);
     await database.saveDecisions(valid);
-    await entryUpdater.markAsRead(toSkip);
+    // miniflux rejects an empty list
+    if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
     console.debug("skipped", skipped.map((e) => e.title));
 
     processedIds.push(...valid.map((d) => d.entry.id));
+};
+
+const sameStoryPrompt = (group: IGroup): string =>
+    `Is the article below about the same news story or event as "${group.summary?.title ?? group.entries[0].title}"? Answer yes or no.`;
+
+const DIGEST_PROMPT =
+    "Is the article below a digest that covers several separate news stories? Answer yes or no.";
+
+const isYes = (answer: string): boolean => answer.toLowerCase().trim() === "yes";
+
+export const runGrouping = async (
+    feedReader: IFeedReader,
+    classifier: IAIClassifier,
+    entryUpdater: IEntryUpdater,
+    groups: IGroupStore,
+    summarizer: IGroupSummarizer,
+    publisher: IFeedPublisher,
+    categoryTitles: string[],
+    windowHours: number,
+    batchSize: number,
+    digestIds: string[],
+): Promise<void> => {
+    const wanted = categoryTitles.map((t) => t.toLowerCase());
+    const categories = (await feedReader.getCategories()).filter((c) =>
+        wanted.includes(parentCategory(c.title).toLowerCase()),
+    );
+    const feeds = (
+        await Promise.all(categories.map((c) => feedReader.getFeedsByCategory(c.id)))
+    ).flat();
+    const unread = (
+        await Promise.all(feeds.map((f) => feedReader.getUnreadEntries(f.id)))
+    ).flat();
+
+    const alreadyGrouped = new Set(await groups.groupedEntryIds(unread.map((e) => e.id)));
+    // grouped in an earlier run whose mark-as-read failed
+    const stale = unread.filter((e) => alreadyGrouped.has(String(e.id)));
+    if (stale.length > 0) {
+        try {
+            await entryUpdater.markAsRead(stale.map((e) => e.id));
+        } catch (err) {
+            console.error(err);
+        }
+    }
+    const toGroup = unread.filter((e) => !alreadyGrouped.has(String(e.id)) && !digestIds.includes(e.id))
+        .slice(0, batchSize);
+
+    const open = await groups.listGroupsSince(windowHours);
+    for (const entry of toGroup) {
+        // a failing entry is retried next run without blocking the others
+        try {
+            // digests stay unread and ungrouped; remembered so they are not re-classified
+            if (isYes(await classifier.classify(entry, DIGEST_PROMPT))) {
+                digestIds.push(entry.id);
+                continue;
+            }
+            let match: IGroup | undefined;
+            for (const group of open) {
+                if (isYes(await classifier.classify(entry, sameStoryPrompt(group)))) {
+                    match = group;
+                    break;
+                }
+            }
+            const id = await groups.addToGroup(match?.id ?? null, entry);
+            const member = { entryId: entry.id, title: entry.title, url: entry.url, content: entry.content };
+            if (match) match.entries.push(member);
+            else open.unshift({ id, entries: [member], updatedAt: "", summary: null, summarizedCount: 0 });
+            await entryUpdater.markAsRead([entry.id]);
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    // generation comes last so the decision model is no longer needed when the generative one loads
+    for (const group of await groups.listGroupsSince(windowHours)) {
+        if (group.summarizedCount === group.entries.length) continue;
+        try {
+            const summary = await summarizer.summarize(group);
+            await groups.saveSummary(group.id, summary, group.entries.length);
+        } catch (err) {
+            console.error(err);
+        }
+    }
+
+    await publisher.publish(await groups.listGroupsSince(windowHours));
 };
 
 // miniflux categories are flat; "Parent / Child" naming is treated as nesting

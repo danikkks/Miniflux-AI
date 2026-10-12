@@ -30,6 +30,18 @@ export const waitFor = async (client: any, method: string, path: string, ms = 10
     throw new Error(`timed out after ${ms}ms`);
 };
 
+export const eventually = async <T>(check: () => T | Promise<T>, ms = 10000): Promise<T> => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+        try {
+            return await check();
+        } catch (err) {
+            if (Date.now() >= deadline) throw err;
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
+};
+
 export const json = (method: string, path: string, statusCode: number, body: object) => ({
     httpRequest: { method, path },
     httpResponse: {
@@ -38,3 +50,13 @@ export const json = (method: string, path: string, statusCode: number, body: obj
         body: JSON.stringify(body),
     },
 });
+
+export const waitForCount = async (client: any, method: string, path: string, count: number, ms = 10000) => {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+        const requests: any[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
+        if (requests.length >= count) return requests;
+        await new Promise(r => setTimeout(r, 100));
+    }
+    throw new Error(`timed out after ${ms}ms`);
+};

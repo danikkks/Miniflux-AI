@@ -33,11 +33,12 @@ export const makeMinifluxClient = (
         },
 
         markAsRead: async (entryIds) => {
-            await fetch(`${baseUrl}/v1/entries`, {
+            const r = await fetch(`${baseUrl}/v1/entries`, {
                 method: "PUT",
                 headers: headers(),
                 body: JSON.stringify({ status: "read", entry_ids: entryIds }),
             });
+            if (!r.ok) throw new Error(`marking entries as read failed: ${r.status}`);
         },
     };
 };

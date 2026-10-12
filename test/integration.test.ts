@@ -5,8 +5,8 @@ import { once } from 'node:events';
 import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
-import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3 } from './fixtures.js';
-import { createClient, startServer, waitFor, json } from './mockserver.js';
+import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3, GROUP_CATEGORY, GROUP_FEED, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_SUB_CATEGORY, GROUP_SUB_FEED, GROUP_ENTRY_C, GROUP_DIGEST } from './fixtures.js';
+import { createClient, startServer, waitFor, waitForCount, eventually, json } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
@@ -31,6 +31,12 @@ const baseEnv = () => ({
     PROCESSING_BATCH_SIZE: '10',
     DATABASE_PATH: DB_FILE,
     WEB_PORT: String(WEB_PORT),
+    GROUPING_CATEGORIES: 'world news',
+    B2_ENDPOINT: `http://localhost:${PORT}`,
+    B2_REGION: 'us-west-004',
+    B2_BUCKET: 'test-bucket',
+    B2_KEY_ID: 'key-id',
+    B2_APPLICATION_KEY: 'app-key',
 });
 
 const spawnApp = (env: Record<string, string> = {}) =>
@@ -101,11 +107,12 @@ test('entry classified as "yes" is stored in sqlite with its decision', async ()
     await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
 
     child = spawnApp();
-    await waitFor(mock, 'PUT', '/v1/entries');
-    const db = new DatabaseSync(DB_FILE, { readOnly: true });
-    const rows = db.prepare('select entry_id, decision from decisions').all();
-    db.close();
-    assert.deepEqual(rows.map((r) => ({ ...r })), [{ entry_id: ENTRY.id, decision: 'yes' }]);
+    await eventually(() => {
+        const db = new DatabaseSync(DB_FILE, { readOnly: true });
+        const rows = db.prepare('select entry_id, decision from decisions').all();
+        db.close();
+        assert.deepEqual(rows.map((r) => ({ ...r })), [{ entry_id: ENTRY.id, decision: 'yes' }]);
+    });
 });
 
 test('entry classified as "yes" is not marked as read', async () => {
@@ -116,9 +123,10 @@ test('entry classified as "yes" is not marked as read', async () => {
     await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
 
     child = spawnApp();
-    const req = await waitFor(mock, 'PUT', '/v1/entries');
-    const body = JSON.parse(req.body.string);
-    assert.deepEqual(body.entry_ids, []);
+    await waitFor(mock, 'POST', '/api/generate');
+    await new Promise((r) => setTimeout(r, 300));
+    const putRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    assert.equal(putRequests.length, 0);
 });
 
 test('decision api: entry classified as "no" is marked as read', async () => {
@@ -160,7 +168,8 @@ test('category without matching prompt - no feeds fetched', async () => {
     await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
 
     child = spawnApp();
-    await waitFor(mock, 'PUT', '/v1/entries');
+    await waitFor(mock, 'GET', '/v1/categories');
+    await new Promise((r) => setTimeout(r, 300));
     const feedsRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'GET', path: `/v1/categories/${sportsCategory.id}/feeds` })) ?? [];
     assert.equal(feedsRequests.length, 0);
 });
@@ -209,16 +218,17 @@ test('review ui: decision not marked wrong is reported as correct', async () => 
     await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
 
     child = spawnApp();
-    await waitFor(mock, 'PUT', '/v1/entries');
-
-    const review = await fetch(`${WEB}/review`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams([['reviewed', String(ENTRY.id)]]),
+    // retried until the decision is stored
+    await eventually(async () => {
+        const review = await fetch(`${WEB}/review`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams([['reviewed', String(ENTRY.id)]]),
+        });
+        const prompt = await review.text();
+        assert.match(prompt, /Wrong decisions \(0\)/);
+        assert.match(prompt, /Correct decisions \(1\)/);
     });
-    const prompt = await review.text();
-    assert.match(prompt, /Wrong decisions \(0\)/);
-    assert.match(prompt, /Correct decisions \(1\)/);
 });
 
 test('review ui: prompt includes decisions reviewed in earlier rounds', async () => {
@@ -294,4 +304,271 @@ test('review ui: subcategories share one prompt with their parent category', asy
     assert.ok(html.includes(ENTRY.title));
     assert.ok(html.includes(ENTRY_3.title));
     assert.match(html, /<h3>Technology News<\/h3>/);
+});
+
+const FEED_PATH = '/test-bucket/grouped.xml';
+
+const DECISION_ENV = { OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest', OLLAMA_SUMMARY_MODEL: 'summary-model' };
+
+const decisionAnswer = (noul: number) => ({
+    model: 'nimble:latest',
+    answers: { relevant: { type: 'noul', noul } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+});
+
+const mockSummary = () =>
+    mock.mockAnyResponse(json('POST', '/api/generate', 200, {
+        response: JSON.stringify({ title: 'Generated title', description: 'Generated description' }),
+        done: true,
+    }));
+
+const mockDecision = async (noul: number) => {
+    await mockSummary();
+    await mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['decision'] }));
+    // no entry is a digest unless a test says so
+    await mock.mockAnyResponse({
+        httpRequest: { method: 'POST', path: '/v1/systemone', body: { type: 'STRING', string: 'digest that covers', subString: true } },
+        httpResponse: { statusCode: 200, body: JSON.stringify(decisionAnswer(0.1)) },
+    });
+    await mock.mockAnyResponse(json('POST', '/v1/systemone', 200, decisionAnswer(noul)));
+};
+
+const mockGroupingSetup = async (entries: object[], categories: object[] = [GROUP_CATEGORY]) => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, categories));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${GROUP_CATEGORY.id}/feeds`, 200, [GROUP_FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${GROUP_FEED.id}/entries`, 200, { entries }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: FEED_PATH }, httpResponse: { statusCode: 200 } });
+};
+
+const items = (body: any): string[] => (String(body.xml ?? body.string ?? body).match(/<item>[\s\S]*?<\/item>/g) ?? []);
+
+test('grouping: articles about the same story are published as one feed item', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const published = items(put.body);
+    assert.equal(published.length, 1);
+    assert.match(published[0], new RegExp(GROUP_ENTRY_A.url));
+    assert.match(published[0], new RegExp(GROUP_ENTRY_B.url));
+    assert.match(put.headers['content-type'][0], /rss\+xml/);
+});
+
+test('grouping: articles about different stories are published as separate feed items', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.1);
+
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const published = items(put.body);
+    assert.equal(published.length, 2);
+    const guids = published.map((i) => i.match(/<guid[^>]*>(.*?)<\/guid>/)![1]);
+    assert.equal(new Set(guids).size, 2);
+});
+
+test('grouping: grouped articles are marked as read in miniflux', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    // each grouped entry is marked right away
+    const reads = await waitForCount(mock, 'PUT', '/v1/entries', 2);
+    const bodies = reads.map((r) => JSON.parse(r.body.string));
+    assert.deepEqual(bodies.flatMap((b) => b.entry_ids).sort(), [GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
+    assert.ok(bodies.every((b) => b.status === 'read'));
+});
+
+test('grouping: article is added to a group stored by a previous run', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A]);
+    await mockDecision(0.9);
+    child = spawnApp(DECISION_ENV);
+    await waitFor(mock, 'PUT', FEED_PATH);
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+
+    await mock.reset();
+    await mockGroupingSetup([GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const published = items(put.body);
+    assert.equal(published.length, 1);
+    assert.match(published[0], new RegExp(GROUP_ENTRY_A.url));
+    assert.match(published[0], new RegExp(GROUP_ENTRY_B.url));
+});
+
+test('grouping and filtering run side by side', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B], [CATEGORY, GROUP_CATEGORY]);
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({
+        httpRequest: { method: 'POST', path: '/v1/systemone', body: { type: 'STRING', string: 'same news story', subString: true } },
+        httpResponse: { statusCode: 200, body: JSON.stringify(decisionAnswer(0.9)) },
+    });
+    await mockDecision(0.1);
+
+    child = spawnApp(DECISION_ENV);
+    const reads = await waitForCount(mock, 'PUT', '/v1/entries', 3);
+    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids).sort();
+    assert.deepEqual(readIds, [ENTRY.id, GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    assert.equal(items(put.body).length, 1);
+});
+
+test('grouping: nothing is published when the decision api is turned off', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
+
+    child = spawnApp();
+    await new Promise((r) => setTimeout(r, 1500));
+    const feedPuts: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: FEED_PATH })) ?? [];
+    const generates: any[] = (await mock.retrieveRecordedRequests({ method: 'POST', path: '/api/generate' })) ?? [];
+    assert.equal(feedPuts.length, 0);
+    assert.equal(generates.length, 0);
+});
+
+test('grouping: subcategory articles are grouped together with their parent category', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A], [GROUP_CATEGORY, GROUP_SUB_CATEGORY]);
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${GROUP_SUB_CATEGORY.id}/feeds`, 200, [GROUP_SUB_FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${GROUP_SUB_FEED.id}/entries`, 200, { entries: [GROUP_ENTRY_C] }));
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const published = items(put.body);
+    assert.equal(published.length, 1);
+    assert.match(published[0], new RegExp(GROUP_ENTRY_A.url));
+    assert.match(published[0], new RegExp(GROUP_ENTRY_C.url));
+});
+
+test('grouping: a digest is neither grouped nor marked as read', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_DIGEST]);
+    await mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['decision'] }));
+    const answer = (regex: string, noul: number) => mock.mockAnyResponse({
+        httpRequest: { method: 'POST', path: '/v1/systemone', body: { type: 'REGEX', regex } },
+        httpResponse: { statusCode: 200, body: JSON.stringify(decisionAnswer(noul)) },
+    });
+    await answer(`(?s).*${GROUP_DIGEST.title}.*digest that covers.*`, 0.9);
+    await answer('(?s).*digest that covers.*', 0.1);
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const published = items(put.body);
+    assert.equal(published.length, 1);
+    assert.match(published[0], new RegExp(GROUP_ENTRY_A.url));
+    assert.doesNotMatch(put.body.xml ?? put.body.string ?? String(put.body), new RegExp(GROUP_DIGEST.url));
+
+    const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
+    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    assert.deepEqual(readIds, [GROUP_ENTRY_A.id]);
+});
+
+test('grouping: group title and description are generated by the summary model', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const [item] = items(put.body);
+    assert.match(item, /<title>Generated title<\/title>/);
+    assert.match(item, /Generated description/);
+
+    const generate = await waitFor(mock, 'POST', '/api/generate');
+    assert.equal(generate.body.json.model, 'summary-model');
+    assert.match(generate.body.json.prompt, new RegExp(GROUP_ENTRY_A.title));
+    assert.match(generate.body.json.prompt, new RegExp(GROUP_ENTRY_B.title));
+});
+
+test('grouping: summaries are generated only after all grouping decisions', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    await waitFor(mock, 'PUT', FEED_PATH);
+    const all: any[] = (await mock.retrieveRecordedRequests({})) ?? [];
+    const paths = all.map((r) => r.path);
+    assert.ok(paths.includes('/api/generate'));
+    assert.ok(paths.lastIndexOf('/v1/systemone') < paths.indexOf('/api/generate'));
+});
+
+test('sequential mode: filtering starts only after grouping and summary generation', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B], [CATEGORY, GROUP_CATEGORY]);
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mockDecision(0.9);
+
+    child = spawnApp({ ...DECISION_ENV, RUN_SEQUENTIALLY: 'true' });
+    await eventually(async () => {
+        const all: any[] = (await mock.retrieveRecordedRequests({})) ?? [];
+        const paths = all.map((r) => r.path);
+        const filterDecision = all.findIndex((r) => r.path === '/v1/systemone' && JSON.stringify(r.body).includes(PROMPT.content));
+        assert.ok(filterDecision > -1);
+        assert.ok(filterDecision > paths.indexOf('/api/generate'));
+    });
+});
+
+test('grouping: an entry whose classification fails does not block the others', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mock.mockAnyResponse({
+        httpRequest: { method: 'POST', path: '/v1/systemone', body: { type: 'REGEX', regex: `(?s).*${GROUP_ENTRY_A.title}.*` } },
+        httpResponse: { statusCode: 500, body: 'boom' },
+    });
+    await mockDecision(0.9);
+
+    child = spawnApp(DECISION_ENV);
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    const published = items(put.body);
+    assert.equal(published.length, 1);
+    assert.match(published[0], new RegExp(GROUP_ENTRY_B.url));
+    assert.doesNotMatch(published[0], new RegExp(GROUP_ENTRY_A.url));
+
+    const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
+    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    assert.deepEqual(readIds, [GROUP_ENTRY_B.id]);
+});
+
+test('grouping: unset batch size means no limit', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp({ ...DECISION_ENV, PROCESSING_BATCH_SIZE: '' });
+    const put = await waitFor(mock, 'PUT', FEED_PATH);
+    assert.equal(items(put.body).length, 1);
+});
+
+test('grouping: entries are left unread when the b2 settings are incomplete', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp({ ...DECISION_ENV, B2_BUCKET: '' });
+    await new Promise((r) => setTimeout(r, 1500));
+    const reads: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    assert.deepEqual(readIds, []);
+});
+
+test('grouping: a grouped entry whose mark-as-read failed is marked on the next run', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [GROUP_CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${GROUP_CATEGORY.id}/feeds`, 200, [GROUP_FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${GROUP_FEED.id}/entries`, 200, { entries: [GROUP_ENTRY_A] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 500 } });
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: FEED_PATH }, httpResponse: { statusCode: 200 } });
+    await mockDecision(0.9);
+    child = spawnApp(DECISION_ENV);
+    await waitForCount(mock, 'PUT', '/v1/entries', 1);
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+
+    await mock.reset();
+    await mockGroupingSetup([GROUP_ENTRY_A]);
+    await mockDecision(0.9);
+    child = spawnApp(DECISION_ENV);
+    const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
+    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    assert.deepEqual(readIds, [GROUP_ENTRY_A.id]);
 });

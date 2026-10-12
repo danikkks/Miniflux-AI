@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { IDatabase, IStoredDecision, Verdict } from "./core.js";
+import type { IDatabase, IGroup, IGroupStore, IStoredDecision, Verdict } from "./core.js";
 
 type Row = {
     entry_id: number;
@@ -103,6 +103,99 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
                 db.exec("rollback");
                 throw err;
             }
+        },
+    };
+};
+
+type GroupRow = {
+    group_id: number;
+    entry_id: number;
+    title: string;
+    url: string;
+    content: string;
+    added_at: string;
+    group_title: string | null;
+    group_description: string | null;
+    summarized_count: number;
+};
+
+export const makeSqliteGroupStore = (path: string): IGroupStore => {
+    const db = new DatabaseSync(path);
+    db.exec(`
+        create table if not exists groups (
+            id integer primary key autoincrement,
+            created_at text not null default current_timestamp,
+            title text,
+            description text,
+            summarized_count integer not null default 0
+        );
+        create table if not exists group_entries (
+            entry_id integer primary key,
+            group_id integer not null references groups (id),
+            title text not null,
+            url text not null,
+            content text not null,
+            added_at text not null default current_timestamp
+        )
+    `);
+    const groupColumns = db.prepare("pragma table_info(groups)").all();
+    if (!groupColumns.some((c) => c.name === "title")) {
+        db.exec("alter table groups add column title text");
+        db.exec("alter table groups add column description text");
+        db.exec("alter table groups add column summarized_count integer not null default 0");
+    }
+    const newGroup = db.prepare("insert into groups default values");
+    const addEntry = db.prepare("insert or ignore into group_entries (entry_id, group_id, title, url, content) values (?, ?, ?, ?, ?)");
+
+    return {
+        listGroupsSince: async (hours) => {
+            const rows = db.prepare(`
+                select e.group_id, e.entry_id, e.title, e.url, e.content, e.added_at,
+                    g.title as group_title, g.description as group_description, g.summarized_count
+                from group_entries e join groups g on g.id = e.group_id
+                where e.group_id in (
+                    select group_id from group_entries group by group_id
+                    having max(added_at) >= datetime('now', ?)
+                )
+                order by e.added_at, e.entry_id
+            `).all(`-${hours} hours`) as GroupRow[];
+
+            const byId = new Map<number, IGroup>();
+            for (const r of rows) {
+                const group = byId.get(r.group_id) ?? {
+                    id: String(r.group_id),
+                    entries: [],
+                    updatedAt: r.added_at,
+                    summary: r.group_title === null ? null : { title: r.group_title, description: r.group_description ?? "" },
+                    summarizedCount: r.summarized_count,
+                };
+                group.entries.push({ entryId: String(r.entry_id), title: r.title, url: r.url, content: r.content });
+                group.updatedAt = r.added_at;
+                byId.set(r.group_id, group);
+            }
+            return [...byId.values()].sort(
+                (a, b) => b.updatedAt.localeCompare(a.updatedAt) || Number(b.id) - Number(a.id),
+            );
+        },
+
+        groupedEntryIds: async (entryIds) => {
+            const placeholders = entryIds.map(() => "?").join(",");
+            return (db
+                .prepare(`select entry_id from group_entries where entry_id in (${placeholders})`)
+                .all(...entryIds) as { entry_id: number }[]).map((r) => String(r.entry_id));
+        },
+
+        addToGroup: async (groupId, entry) => {
+            const existing = db.prepare("select group_id from group_entries where entry_id = ?").get(entry.id) as { group_id: number } | undefined;
+            if (existing) return String(existing.group_id);
+            const id = groupId ?? String(newGroup.run().lastInsertRowid);
+            addEntry.run(entry.id, id, entry.title, entry.url, entry.content);
+            return id;
+        },
+
+        saveSummary: async (groupId, summary, entryCount) => {
+            db.prepare("update groups set title = ?, description = ?, summarized_count = ? where id = ?")
+                .run(summary.title, summary.description, entryCount, groupId);
         },
     };
 };
