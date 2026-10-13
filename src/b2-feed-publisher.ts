@@ -65,7 +65,10 @@ export const makeB2FeedPublisher = (config: B2Config): IFeedPublisher => {
     return {
         publish: async (groups) => {
             const xml = buildFeed(groups, config.feedTitle, config.feedLink);
-            if (xml === lastPublished) return;
+            if (xml === lastPublished) {
+                console.debug("feedUnchanged, upload skipped");
+                return;
+            }
             await client.send(new PutObjectCommand({
                 Bucket: config.bucket,
                 Key: config.objectKey,
@@ -74,6 +77,7 @@ export const makeB2FeedPublisher = (config: B2Config): IFeedPublisher => {
                 CacheControl: "max-age=300",
             }));
             lastPublished = xml;
+            console.debug("feedUploaded", `${config.bucket}/${config.objectKey}`, xml.length);
         },
     };
 };

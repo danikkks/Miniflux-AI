@@ -237,12 +237,15 @@ export const runGrouping = async (
     const categories = (await feedReader.getCategories()).filter((c) =>
         wanted.includes(parentCategory(c.title).toLowerCase()),
     );
+    console.debug("groupingCategories", categories.map((c) => c.title));
     const feeds = (
         await Promise.all(categories.map((c) => feedReader.getFeedsByCategory(c.id)))
     ).flat();
+    console.debug("groupingFeeds", feeds.map((f) => f.id));
     const unread = (
         await Promise.all(feeds.map((f) => feedReader.getUnreadEntries(f.id)))
     ).flat();
+    console.debug("groupingUnreadEntries", unread.map((e) => e.title));
 
     const alreadyGrouped = new Set(await groups.groupedEntryIds(unread.map((e) => e.id)));
     // grouped in an earlier run whose mark-as-read failed
@@ -256,14 +259,17 @@ export const runGrouping = async (
     }
     const toGroup = unread.filter((e) => !alreadyGrouped.has(String(e.id)) && !digestIds.includes(e.id))
         .slice(0, batchSize);
+    console.debug("groupingEntriesToGroup", toGroup.map((e) => e.title));
 
     const open = await groups.listGroupsSince(windowHours);
+    console.debug("groupingOpenGroups", open.map((g) => ({ id: g.id, title: g.summary?.title ?? g.entries[0].title, entries: g.entries.length })));
     for (const entry of toGroup) {
         // a failing entry is retried next run without blocking the others
         try {
             // digests stay unread and ungrouped; remembered so they are not re-classified
             if (isYes(await classifier.classify(entry, DIGEST_PROMPT))) {
                 digestIds.push(entry.id);
+                console.debug("groupingDigestSkipped", entry.title);
                 continue;
             }
             let match: IGroup | undefined;
@@ -274,6 +280,7 @@ export const runGrouping = async (
                 }
             }
             const id = await groups.addToGroup(match?.id ?? null, entry);
+            console.debug("groupingEntryGrouped", { entry: entry.title, group: id, new: !match });
             const member = { entryId: entry.id, title: entry.title, url: entry.url, content: entry.content };
             if (match) match.entries.push(member);
             else open.unshift({ id, entries: [member], updatedAt: "", summary: null, summarizedCount: 0 });
@@ -289,12 +296,15 @@ export const runGrouping = async (
         try {
             const summary = await summarizer.summarize(group);
             await groups.saveSummary(group.id, summary, group.entries.length);
+            console.debug("groupingSummary", { group: group.id, ...summary });
         } catch (err) {
             console.error(err);
         }
     }
 
-    await publisher.publish(await groups.listGroupsSince(windowHours));
+    const published = await groups.listGroupsSince(windowHours);
+    console.debug("groupingPublishing", published.length);
+    await publisher.publish(published);
 };
 
 // miniflux categories are flat; "Parent / Child" naming is treated as nesting
