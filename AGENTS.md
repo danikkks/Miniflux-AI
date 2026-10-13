@@ -51,7 +51,7 @@ When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DEC
 
 ### Review UI
 
-`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user ticks the wrong ones. Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. The user applies the result to the prompt file manually.
+`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user ticks the wrong ones. Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. A "keep newest N" slider above the list discards older unreviewed decisions (`POST /discard`): they leave the queue with no verdict, so they never reach the prompt history; rows that already have a verdict are kept. The user applies the result to the prompt file manually.
 
 ### Interfaces (`core.ts`)
 

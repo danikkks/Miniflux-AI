@@ -23,7 +23,6 @@ const toItem = (group: IGroup): string => `<item>
 <description><![CDATA[${describe(group)}]]></description>
 </item>`;
 
-// output depends only on the groups, so identical groups give identical xml
 const buildFeed = (groups: IGroup[], title: string, link: string): string => {
     const lastBuild = groups[0] ? `\n<lastBuildDate>${toDate(groups[0].updatedAt).toUTCString()}</lastBuildDate>` : "";
     return `<?xml version="1.0" encoding="UTF-8"?>
@@ -56,7 +55,6 @@ export const makeB2FeedPublisher = (config: B2Config): IFeedPublisher => {
         region: config.region,
         credentials: { accessKeyId: config.keyId, secretAccessKey: config.applicationKey },
         forcePathStyle: true,
-        // b2 rejects the checksum headers newer sdk versions add by default
         requestChecksumCalculation: "WHEN_REQUIRED",
         responseChecksumValidation: "WHEN_REQUIRED",
     });

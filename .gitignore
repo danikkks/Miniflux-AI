@@ -6,3 +6,4 @@ logs.txt
 *.jar
 *.db
 data
+!eslint.config.js

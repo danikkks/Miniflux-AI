@@ -1,12 +1,12 @@
 import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3, GROUP_CATEGORY, GROUP_FEED, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_SUB_CATEGORY, GROUP_SUB_FEED, GROUP_ENTRY_C, GROUP_DIGEST } from './fixtures.js';
-import { createClient, startServer, waitFor, waitForCount, eventually, json } from './mockserver.js';
+import { createClient, startServer, waitFor, waitForCount, eventually, json, type RecordedRequest } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
@@ -18,8 +18,8 @@ const WEB_PORT = 18081;
 const WEB = `http://localhost:${WEB_PORT}`;
 const mock = createClient(PORT);
 
-let mockProcess: any;
-let child: any;
+let mockProcess: ChildProcess | undefined;
+let child: ChildProcess | undefined;
 
 const baseEnv = () => ({
     MINIFLUX_URL: `http://localhost:${PORT}`,
@@ -125,7 +125,7 @@ test('entry classified as "yes" is not marked as read', async () => {
     child = spawnApp();
     await waitFor(mock, 'POST', '/api/generate');
     await new Promise((r) => setTimeout(r, 300));
-    const putRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    const putRequests: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
     assert.equal(putRequests.length, 0);
 });
 
@@ -158,7 +158,7 @@ test('decision api: model missing "decision" capability is never marked as read'
     child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
     await waitFor(mock, 'POST', '/api/show');
     await new Promise((r) => setTimeout(r, 300));
-    const putRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    const putRequests: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
     assert.equal(putRequests.length, 0);
 });
 
@@ -170,7 +170,7 @@ test('category without matching prompt - no feeds fetched', async () => {
     child = spawnApp();
     await waitFor(mock, 'GET', '/v1/categories');
     await new Promise((r) => setTimeout(r, 300));
-    const feedsRequests: any[] = (await mock.retrieveRecordedRequests({ method: 'GET', path: `/v1/categories/${sportsCategory.id}/feeds` })) ?? [];
+    const feedsRequests: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'GET', path: `/v1/categories/${sportsCategory.id}/feeds` })) ?? [];
     assert.equal(feedsRequests.length, 0);
 });
 
@@ -218,7 +218,6 @@ test('review ui: decision not marked wrong is reported as correct', async () => 
     await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
 
     child = spawnApp();
-    // retried until the decision is stored
     await eventually(async () => {
         const review = await fetch(`${WEB}/review`, {
             method: 'POST',
@@ -273,7 +272,7 @@ test('decision api: oversized entry is truncated to fit the 64 KiB request limit
 
     child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
     await waitFor(mock, 'PUT', '/v1/entries');
-    const [req]: any[] = await mock.retrieveRecordedRequests({ method: 'POST', path: '/v1/systemone' });
+    const [req] = (await mock.retrieveRecordedRequests({ method: 'POST', path: '/v1/systemone' })) ?? [];
     const size = Number(req.headers['content-length'][0]);
     assert.ok(size <= 64 * 1024, `request body was ${size} bytes`);
 });
@@ -325,7 +324,6 @@ const mockSummary = () =>
 const mockDecision = async (noul: number) => {
     await mockSummary();
     await mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['decision'] }));
-    // no entry is a digest unless a test says so
     await mock.mockAnyResponse({
         httpRequest: { method: 'POST', path: '/v1/systemone', body: { type: 'STRING', string: 'digest that covers', subString: true } },
         httpResponse: { statusCode: 200, body: JSON.stringify(decisionAnswer(0.1)) },
@@ -341,7 +339,7 @@ const mockGroupingSetup = async (entries: object[], categories: object[] = [GROU
     await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: FEED_PATH }, httpResponse: { statusCode: 200 } });
 };
 
-const items = (body: any): string[] => (String(body.xml ?? body.string ?? body).match(/<item>[\s\S]*?<\/item>/g) ?? []);
+const items = (body: { string?: string; xml?: string }): string[] => (String(body.xml ?? body.string ?? body).match(/<item>[\s\S]*?<\/item>/g) ?? []);
 
 test('grouping: articles about the same story are published as one feed item', async () => {
     await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
@@ -373,7 +371,6 @@ test('grouping: grouped articles are marked as read in miniflux', async () => {
     await mockDecision(0.9);
 
     child = spawnApp(DECISION_ENV);
-    // each grouped entry is marked right away
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 2);
     const bodies = reads.map((r) => JSON.parse(r.body.string));
     assert.deepEqual(bodies.flatMap((b) => b.entry_ids).sort(), [GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
@@ -424,8 +421,8 @@ test('grouping: nothing is published when the decision api is turned off', async
 
     child = spawnApp();
     await new Promise((r) => setTimeout(r, 1500));
-    const feedPuts: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: FEED_PATH })) ?? [];
-    const generates: any[] = (await mock.retrieveRecordedRequests({ method: 'POST', path: '/api/generate' })) ?? [];
+    const feedPuts: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: FEED_PATH })) ?? [];
+    const generates: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'POST', path: '/api/generate' })) ?? [];
     assert.equal(feedPuts.length, 0);
     assert.equal(generates.length, 0);
 });
@@ -489,7 +486,7 @@ test('grouping: summaries are generated only after all grouping decisions', asyn
 
     child = spawnApp(DECISION_ENV);
     await waitFor(mock, 'PUT', FEED_PATH);
-    const all: any[] = (await mock.retrieveRecordedRequests({})) ?? [];
+    const all: RecordedRequest[] = (await mock.retrieveRecordedRequests({})) ?? [];
     const paths = all.map((r) => r.path);
     assert.ok(paths.includes('/api/generate'));
     assert.ok(paths.lastIndexOf('/v1/systemone') < paths.indexOf('/api/generate'));
@@ -503,7 +500,7 @@ test('sequential mode: filtering starts only after grouping and summary generati
 
     child = spawnApp({ ...DECISION_ENV, RUN_SEQUENTIALLY: 'true' });
     await eventually(async () => {
-        const all: any[] = (await mock.retrieveRecordedRequests({})) ?? [];
+        const all: RecordedRequest[] = (await mock.retrieveRecordedRequests({})) ?? [];
         const paths = all.map((r) => r.path);
         const filterDecision = all.findIndex((r) => r.path === '/v1/systemone' && JSON.stringify(r.body).includes(PROMPT.content));
         assert.ok(filterDecision > -1);
@@ -546,7 +543,7 @@ test('grouping: entries are left unread when the b2 settings are incomplete', as
 
     child = spawnApp({ ...DECISION_ENV, B2_BUCKET: '' });
     await new Promise((r) => setTimeout(r, 1500));
-    const reads: any[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    const reads: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
     const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
     assert.deepEqual(readIds, []);
 });
@@ -571,4 +568,46 @@ test('grouping: a grouped entry whose mark-as-read failed is marked on the next 
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
     const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
     assert.deepEqual(readIds, [GROUP_ENTRY_A.id]);
+});
+
+test('review ui: discarding keeps the newest decisions and drops the rest from prompt history', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY, ENTRY_2] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const pending = await (await fetch(WEB)).text();
+    assert.match(pending, /type="range" name="keep" min="0" max="2" value="2"/);
+
+    const discard = await fetch(`${WEB}/discard`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['keep', '1']]),
+    });
+    const afterDiscard = await discard.text();
+    assert.match(afterDiscard, new RegExp(ENTRY_2.title));
+    assert.doesNotMatch(afterDiscard, new RegExp(ENTRY.title));
+
+    const review = await fetch(`${WEB}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['reviewed', String(ENTRY_2.id)], ['wrong', String(ENTRY_2.id)]]),
+    });
+    const prompt = await review.text();
+    assert.match(prompt, new RegExp(ENTRY_2.title));
+    assert.doesNotMatch(prompt, new RegExp(ENTRY.title));
+});
+
+test('review ui: discarding with an invalid keep value is rejected', async () => {
+    child = spawnApp();
+    await new Promise((r) => setTimeout(r, 800));
+    const res = await fetch(`${WEB}/discard`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['keep', 'abc']]),
+    });
+    assert.equal(res.status, 400);
 });

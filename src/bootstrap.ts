@@ -35,7 +35,6 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
         parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
     const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE) || Infinity;
 
-    // grouping (with summaries) comes before filtering
     const steps: (() => Promise<void>)[] = [];
 
     const groupingCategories = (process.env.GROUPING_CATEGORIES || "")
@@ -73,7 +72,6 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
     );
 
     if (process.env.RUN_SEQUENTIALLY === "true") {
-        // one model in ollama memory at a time: a failing step must not block the next
         await loop(intervalMs, async () => {
             for (const step of steps) {
                 try {

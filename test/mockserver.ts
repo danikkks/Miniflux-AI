@@ -1,29 +1,38 @@
 import { createRequire } from 'node:module';
+import type { MockServerClient } from 'mockserver-client';
 
 const require = createRequire(import.meta.url);
 const { runBinary } = require('mockserver-node/downloadBinary');
 const { version } = require('mockserver-node/package.json');
 const { mockServerClient } = require('mockserver-client');
 
-export const createClient = (port: number) => mockServerClient('localhost', port);
+export interface RecordedRequest {
+    path: string;
+    headers: Record<string, string[]>;
+    body: { string: string; xml?: string; json: Record<string, string> };
+}
+
+export type MockClient = Omit<MockServerClient, 'retrieveRecordedRequests'> & {
+    retrieveRecordedRequests: (request: { method?: string; path?: string }) => Promise<RecordedRequest[] | undefined>;
+};
+
+export const createClient = (port: number): MockClient => mockServerClient('localhost', port);
 
 export const startServer = async (port: number) => {
     const proc = await runBinary(version, ['run', '-p', String(port)]);
     const deadline = Date.now() + 60000;
     while (Date.now() < deadline) {
-        try {
-            const res = await fetch(`http://localhost:${port}/mockserver/status`, { method: 'PUT' });
-            if (res.ok) return proc;
-        } catch { /* not ready yet */ }
+        const ready = await fetch(`http://localhost:${port}/mockserver/status`, { method: 'PUT' }).then(res => res.ok, () => false);
+        if (ready) return proc;
         await new Promise(r => setTimeout(r, 300));
     }
     throw new Error(`MockServer on port ${port} did not start within 60s`);
 };
 
-export const waitFor = async (client: any, method: string, path: string, ms = 10000) => {
+export const waitFor = async (client: MockClient, method: string, path: string, ms = 10000) => {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
-        const requests: any[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
+        const requests: RecordedRequest[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
         if (requests.length > 0) return requests[0];
         await new Promise(r => setTimeout(r, 100));
     }
@@ -51,10 +60,10 @@ export const json = (method: string, path: string, statusCode: number, body: obj
     },
 });
 
-export const waitForCount = async (client: any, method: string, path: string, count: number, ms = 10000) => {
+export const waitForCount = async (client: MockClient, method: string, path: string, count: number, ms = 10000) => {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
-        const requests: any[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
+        const requests: RecordedRequest[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
         if (requests.length >= count) return requests;
         await new Promise(r => setTimeout(r, 100));
     }

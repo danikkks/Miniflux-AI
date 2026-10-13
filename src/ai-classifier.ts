@@ -5,13 +5,9 @@ import type { IAIClassifier, IEntry } from "./core.js";
 
 const DECISION_CAPABILITY = "decision";
 const DECISION_QUESTION_KEY = "relevant";
-// /v1/systemone rejects requests over this many tokens and never truncates input itself.
-// chars-per-token varies by script/content, so we can't size the truncation up front; instead
-// we retry using the actual token count the server reports on overflow.
 const SYSTEMONE_TOKEN_LIMIT = 8194;
 const SYSTEMONE_TOKEN_TARGET = SYSTEMONE_TOKEN_LIMIT * 0.9;
 const SYSTEMONE_MAX_ATTEMPTS = 3;
-// /v1/systemone answers 413 above this request body size
 const SYSTEMONE_BODY_LIMIT_BYTES = 64 * 1024 * 0.9;
 
 const systemoneRequest = (model: string, state: string, prompt: string) => ({
@@ -22,7 +18,6 @@ const systemoneRequest = (model: string, state: string, prompt: string) => ({
     },
 });
 
-// every removed char drops at least one byte from the json body, so one slice is enough
 const fitToBodyLimit = (model: string, state: string, prompt: string): string => {
     const size = Buffer.byteLength(JSON.stringify(systemoneRequest(model, state, prompt)));
     const excess = size - SYSTEMONE_BODY_LIMIT_BYTES;
@@ -35,7 +30,6 @@ const overflowTokenCount = (err: unknown): number | null => {
     return match ? Number(match[1]) : null;
 };
 
-// capability string returned by `ollama show`, not the model name or api path
 export const supportsDecisionApi = async (client: Ollama, model: string): Promise<boolean> => {
     const info = await client.show({ model });
     return info.capabilities.includes(DECISION_CAPABILITY);
@@ -54,7 +48,6 @@ const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEn
         } catch (err) {
             const actualTokens = overflowTokenCount(err);
             if (actualTokens === null || attempt === SYSTEMONE_MAX_ATTEMPTS) throw err;
-            // recalibrate the truncation from the server's own token count instead of guessing chars-per-token
             state = state.slice(0, Math.floor(state.length * (SYSTEMONE_TOKEN_TARGET / actualTokens)));
         }
     }

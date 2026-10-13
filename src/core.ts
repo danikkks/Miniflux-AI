@@ -68,9 +68,7 @@ export type IGroup = {
     id: string;
     entries: IGroupedEntry[];
     updatedAt: string;
-    // generated after grouping; null until then
     summary: IGroupSummary | null;
-    // number of entries the summary was generated from
     summarizedCount: number;
 };
 
@@ -100,13 +98,12 @@ export interface IDatabase {
     listRecentVerdicts(parentCategory: string, limit: number): Promise<IStoredDecision[]>;
     saveVerdicts(verdicts: IVerdict[]): Promise<void>;
     markReviewed(entryIds: string[]): Promise<void>;
+    discardUnreviewedExceptNewest(keep: number): Promise<void>;
 }
 
 export interface IGroupStore {
-    // groups updated within the last `hours`, most recently updated first
     listGroupsSince(hours: number): Promise<IGroup[]>;
     groupedEntryIds(entryIds: string[]): Promise<string[]>;
-    // a null groupId starts a new group; returns the id of the group the entry joined
     addToGroup(groupId: string | null, entry: IEntry): Promise<string>;
     saveSummary(groupId: string, summary: IGroupSummary, entryCount: number): Promise<void>;
 }
@@ -127,6 +124,7 @@ export interface IReviewService {
     listPending(): Promise<IReviewItem[]>;
     submitReview(shownIds: string[], wrongIds: string[]): Promise<IReviewPrompt[]>;
     markReviewed(entryIds: string[]): Promise<void>;
+    discardPending(keep: number): Promise<void>;
 }
 
 export const findPromptForCategory = (
@@ -206,7 +204,6 @@ export const run = async (
 
     const valid = validDecisions(decisions);
     await database.saveDecisions(valid);
-    // miniflux rejects an empty list
     if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
     console.debug("skipped", skipped.map((e) => e.title));
 
@@ -248,7 +245,6 @@ export const runGrouping = async (
     console.debug("groupingUnreadEntries", unread.map((e) => e.title));
 
     const alreadyGrouped = new Set(await groups.groupedEntryIds(unread.map((e) => e.id)));
-    // grouped in an earlier run whose mark-as-read failed
     const stale = unread.filter((e) => alreadyGrouped.has(String(e.id)));
     if (stale.length > 0) {
         try {
@@ -264,9 +260,7 @@ export const runGrouping = async (
     const open = await groups.listGroupsSince(windowHours);
     console.debug("groupingOpenGroups", open.map((g) => ({ id: g.id, title: g.summary?.title ?? g.entries[0].title, entries: g.entries.length })));
     for (const entry of toGroup) {
-        // a failing entry is retried next run without blocking the others
         try {
-            // digests stay unread and ungrouped; remembered so they are not re-classified
             if (isYes(await classifier.classify(entry, DIGEST_PROMPT))) {
                 digestIds.push(entry.id);
                 console.debug("groupingDigestSkipped", entry.title);
@@ -290,7 +284,6 @@ export const runGrouping = async (
         }
     }
 
-    // generation comes last so the decision model is no longer needed when the generative one loads
     for (const group of await groups.listGroupsSince(windowHours)) {
         if (group.summarizedCount === group.entries.length) continue;
         try {
@@ -307,7 +300,6 @@ export const runGrouping = async (
     await publisher.publish(published);
 };
 
-// miniflux categories are flat; "Parent / Child" naming is treated as nesting
 const SUBCATEGORY_SEPARATOR = " / ";
 
 const parentCategory = (title: string): string =>
@@ -389,4 +381,6 @@ export const makeReviewService = (
     },
 
     markReviewed: (entryIds) => database.markReviewed(entryIds),
+
+    discardPending: (keep) => database.discardUnreviewedExceptNewest(keep),
 });

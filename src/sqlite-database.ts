@@ -61,7 +61,6 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
             decided_at = current_timestamp
     `);
     const setVerdict = db.prepare("update decisions set verdict = ?, verdict_at = current_timestamp where entry_id = ?");
-    // sql mirror of parentCategory() in core.ts
     const parentOf = "case when instr(category, ' / ') > 0 then substr(category, 1, instr(category, ' / ') - 1) else category end";
     const selectColumns = "entry_id, title, url, content, category, decision, verdict";
 
@@ -92,6 +91,16 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
         markReviewed: async (entryIds) => {
             const placeholders = entryIds.map(() => "?").join(",");
             db.prepare(`update decisions set reviewed = 1 where entry_id in (${placeholders})`).run(...entryIds);
+        },
+
+        discardUnreviewedExceptNewest: async (keep) => {
+            db.prepare(`
+                update decisions set reviewed = 1
+                where reviewed = 0 and verdict is null and entry_id not in (
+                    select entry_id from decisions where reviewed = 0
+                    order by decided_at desc, entry_id desc limit ?
+                )
+            `).run(keep);
         },
 
         saveVerdicts: async (verdicts) => {

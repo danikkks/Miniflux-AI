@@ -28,7 +28,6 @@ export const makeAISummarizer = (host: string, model: string): IGroupSummarizer 
                 think: false,
             });
             const { title, description } = JSON.parse(r.response);
-            // thrown so the group is retried next run instead of stored with an empty title
             if (!title?.trim()) throw new Error("summary has an empty title");
             return { title, description };
         },

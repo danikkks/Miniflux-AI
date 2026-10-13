@@ -28,10 +28,22 @@ const itemRow = (i: IReviewItem): string => `
         <details><summary>excerpt</summary>${esc(i.excerpt)}</details>
     </li>`;
 
+const DISCARD_OUTPUT_SCRIPT = "this.nextElementSibling.value=this.value";
+
+const discardForm = (total: number): string => `
+    <form hx-post="/discard" hx-target="#step" hx-confirm="Discard the older unreviewed decisions? They will not be used for prompt improvement.">
+        <label>keep newest
+            <input type="range" name="keep" min="0" max="${total}" value="${total}" oninput="${DISCARD_OUTPUT_SCRIPT}">
+            <output>${total}</output>
+        </label>
+        <button type="submit">discard the rest</button>
+    </form>`;
+
 const pendingStep = (items: IReviewItem[]): string =>
     items.length === 0
         ? `<p>nothing to review</p>`
         : `<h2>1. mark the wrong decisions (${items.length} unreviewed)</h2>
+    ${discardForm(items.length)}
     <form hx-post="/review" hx-target="#step">
         <ul>${items.map(itemRow).join("")}</ul>
         <button type="submit">review done</button>
@@ -98,6 +110,12 @@ export const startWebUi = (service: IReviewService, port: number) => {
                 const body = await readBody(req);
                 const prompts = await service.submitReview(body.getAll("reviewed"), body.getAll("wrong"));
                 return send(res, 200, promptsStep(prompts));
+            }
+            if (req.method === "POST" && req.url === "/discard") {
+                const keep = parseInt((await readBody(req)).get("keep"));
+                if (!(keep >= 0)) return send(res, 400, "keep must be a non-negative number");
+                await service.discardPending(keep);
+                return send(res, 200, pendingStep(await service.listPending()));
             }
             if (req.method === "POST" && req.url === "/reviewed") {
                 const body = await readBody(req);
