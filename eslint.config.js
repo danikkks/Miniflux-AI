@@ -13,6 +13,11 @@ const noComments = {
   }),
 };
 
+const noClasses = {
+  selector: "ClassDeclaration, ClassExpression",
+  message: "do not define classes. use a factory function that returns an object and keeps state in a closure",
+};
+
 export default tseslint.config(
   { ignores: ["*.js", "node_modules"] },
   js.configs.recommended,
@@ -22,6 +27,7 @@ export default tseslint.config(
     files: ["src/**/*.ts", "test/**/*.ts"],
     plugins: { local: { rules: { "no-comments": noComments } } },
     rules: {
+      "no-restricted-syntax": ["error", noClasses],
       "local/no-comments": "error",
       "@typescript-eslint/no-floating-promises": ["error", { allowForKnownSafeCalls: [{ from: "package", package: "node:test", name: ["test"] }] }],
       "@typescript-eslint/restrict-template-expressions": ["error", { allowNumber: true }],
@@ -31,7 +37,7 @@ export default tseslint.config(
     files: ["src/**/*.ts"],
     ignores: ["src/bootstrap.ts"],
     rules: {
-      "no-restricted-syntax": ["error", {
+      "no-restricted-syntax": ["error", noClasses, {
         selector: "MemberExpression[object.name='process'][property.name='env']",
         message: "only src/bootstrap.ts may read environment variables. pass values in as arguments",
       }],
@@ -41,7 +47,7 @@ export default tseslint.config(
     files: ["test/**/*.ts"],
     ignores: ["test/mockserver.ts"],
     rules: {
-      "no-restricted-syntax": ["error", {
+      "no-restricted-syntax": ["error", noClasses, {
         selector: "CallExpression[callee.name='setTimeout']",
         message: "use eventually() to wait for a condition, or settle() to prove nothing happens",
       }],
