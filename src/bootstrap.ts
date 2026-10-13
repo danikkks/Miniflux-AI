@@ -7,8 +7,14 @@ import { makeAISummarizer } from "./ai-summarizer.js";
 import { makeB2FeedPublisher } from "./b2-feed-publisher.js";
 import { startWebUi } from "./web-ui.js";
 
+const requireEnv = (name: string): string => {
+    const value = process.env[name];
+    if (!value) throw new Error(`${name} is required`);
+    return value;
+};
+
 const loop = async (intervalMs: number, task: () => Promise<void>): Promise<never> => {
-    while (true) {
+    for (;;) {
         try {
             await task();
         } catch (err) {
@@ -18,12 +24,18 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
     }
 };
 
-(async () => {
+void (async () => {
     const miniflux = makeMinifluxClient(
-        process.env.MINIFLUX_URL,
-        process.env.MINIFLUX_AUTH_TOKEN,
+        requireEnv("MINIFLUX_URL"),
+        requireEnv("MINIFLUX_AUTH_TOKEN"),
     );
-    const classifier = makeAIClassifier();
+    const classifier = makeAIClassifier({
+        useOpenAI: process.env.AI_PROVIDER === "OPENAI",
+        openaiApiKey: process.env.OPENAI_API_KEY || "",
+        ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
+        ollamaModel: process.env.OLLAMA_MODEL,
+        useDecisionApi: process.env.OLLAMA_DECISION_API === "true",
+    });
     const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
     const database = makeSqliteDatabase(databasePath);
     const processedIds: string[] = [];
@@ -33,7 +45,7 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
     );
     const intervalMs =
         parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
-    const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE) || Infinity;
+    const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE ?? "") || Infinity;
 
     const steps: (() => Promise<void>)[] = [];
 
@@ -50,16 +62,16 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
     }
     if (groupingCategories.length > 0 && groupingEnabled) {
         const groups = makeSqliteGroupStore(databasePath);
-        const summarizer = makeAISummarizer(process.env.OLLAMA_BASE_URL, summaryModel);
+        const summarizer = makeAISummarizer(requireEnv("OLLAMA_BASE_URL"), requireEnv("OLLAMA_SUMMARY_MODEL"));
         const publisher = makeB2FeedPublisher({
-            endpoint: process.env.B2_ENDPOINT,
-            region: process.env.B2_REGION,
-            bucket: process.env.B2_BUCKET,
-            keyId: process.env.B2_KEY_ID,
-            applicationKey: process.env.B2_APPLICATION_KEY,
+            endpoint: requireEnv("B2_ENDPOINT"),
+            region: requireEnv("B2_REGION"),
+            bucket: requireEnv("B2_BUCKET"),
+            keyId: requireEnv("B2_KEY_ID"),
+            applicationKey: requireEnv("B2_APPLICATION_KEY"),
             objectKey: process.env.GROUPED_FEED_KEY || "grouped.xml",
             feedTitle: process.env.GROUPED_FEED_TITLE || "Grouped articles",
-            feedLink: process.env.MINIFLUX_URL,
+            feedLink: requireEnv("MINIFLUX_URL"),
         });
         const digestIds: string[] = [];
         const windowHours = parseInt(process.env.GROUPING_WINDOW_HOURS || "48");

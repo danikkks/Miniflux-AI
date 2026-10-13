@@ -98,35 +98,46 @@ const send = (res: ServerResponse, status: number, html: string): void => {
 };
 
 export const startWebUi = (service: IReviewService, port: number) => {
-    const server = createServer(async (req, res) => {
+    const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         try {
             if (req.method === "GET" && req.url === "/") {
-                return send(res, 200, page(pendingStep(await service.listPending())));
+                send(res, 200, page(pendingStep(await service.listPending())));
+                return;
             }
             if (req.method === "GET" && req.url === "/pending") {
-                return send(res, 200, pendingStep(await service.listPending()));
+                send(res, 200, pendingStep(await service.listPending()));
+                return;
             }
             if (req.method === "POST" && req.url === "/review") {
                 const body = await readBody(req);
                 const prompts = await service.submitReview(body.getAll("reviewed"), body.getAll("wrong"));
-                return send(res, 200, promptsStep(prompts));
+                send(res, 200, promptsStep(prompts));
+                return;
             }
             if (req.method === "POST" && req.url === "/discard") {
-                const keep = parseInt((await readBody(req)).get("keep"));
-                if (!(keep >= 0)) return send(res, 400, "keep must be a non-negative number");
+                const keep = parseInt((await readBody(req)).get("keep") ?? "");
+                if (!(keep >= 0)) {
+                    send(res, 400, "keep must be a non-negative number");
+                    return;
+                }
                 await service.discardPending(keep);
-                return send(res, 200, pendingStep(await service.listPending()));
+                send(res, 200, pendingStep(await service.listPending()));
+                return;
             }
             if (req.method === "POST" && req.url === "/reviewed") {
                 const body = await readBody(req);
                 await service.markReviewed(body.getAll("reviewed"));
-                return send(res, 200, "marked as reviewed");
+                send(res, 200, "marked as reviewed");
+                return;
             }
             send(res, 404, "not found");
         } catch (err) {
             console.error(err);
             send(res, 500, "internal error");
         }
+    };
+    const server = createServer((req, res) => {
+        void handle(req, res);
     });
     server.on("error", console.error);
     server.listen(port);

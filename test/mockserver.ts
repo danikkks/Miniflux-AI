@@ -1,16 +1,19 @@
 import { createRequire } from 'node:module';
+import type { ChildProcess } from 'node:child_process';
 import type { MockServerClient } from 'mockserver-client';
 
 const require = createRequire(import.meta.url);
-const { runBinary } = require('mockserver-node/downloadBinary');
-const { version } = require('mockserver-node/package.json');
-const { mockServerClient } = require('mockserver-client');
+const { runBinary } = require('mockserver-node/downloadBinary') as { runBinary: (version: string, args: string[]) => Promise<ChildProcess> };
+const { version } = require('mockserver-node/package.json') as { version: string };
+const { mockServerClient } = require('mockserver-client') as { mockServerClient: (host: string, port: number) => MockClient };
 
 export interface RecordedRequest {
     path: string;
     headers: Record<string, string[]>;
     body: { string: string; xml?: string; json: Record<string, string> };
 }
+
+export const entryUpdate = (request: RecordedRequest) => JSON.parse(request.body.string) as { entry_ids: number[]; status: string };
 
 export type MockClient = Omit<MockServerClient, 'retrieveRecordedRequests'> & {
     retrieveRecordedRequests: (request: { method?: string; path?: string }) => Promise<RecordedRequest[] | undefined>;

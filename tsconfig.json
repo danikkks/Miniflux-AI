@@ -4,6 +4,7 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "moduleDetection": "force",
+    "strict": true,
     "esModuleInterop": true,
     "verbatimModuleSyntax": true,
     "sourceMap": true,

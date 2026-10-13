@@ -54,9 +54,17 @@ const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEn
     throw new Error("unreachable");
 };
 
-export const makeAIClassifier = (): IAIClassifier => {
-    if (process.env.AI_PROVIDER === "OPENAI") {
-        const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "" });
+export interface IAIClassifierConfig {
+    useOpenAI: boolean;
+    openaiApiKey: string;
+    ollamaBaseUrl: string | undefined;
+    ollamaModel: string | undefined;
+    useDecisionApi: boolean;
+}
+
+export const makeAIClassifier = (config: IAIClassifierConfig): IAIClassifier => {
+    if (config.useOpenAI) {
+        const client = new OpenAI({ apiKey: config.openaiApiKey });
         return {
             classify: async (entry, prompt) => {
                 const r = await client.responses.create({
@@ -69,9 +77,10 @@ export const makeAIClassifier = (): IAIClassifier => {
         };
     }
 
-    const client = new Ollama({ host: process.env.OLLAMA_BASE_URL });
-    const model = process.env.OLLAMA_MODEL;
-    const useDecisionApi = process.env.OLLAMA_DECISION_API === "true";
+    const client = new Ollama({ host: config.ollamaBaseUrl });
+    const model = config.ollamaModel;
+    if (!model) throw new Error("OLLAMA_MODEL is required");
+    const { useDecisionApi } = config;
     let decisionApiChecked = false;
 
     return {
@@ -91,6 +100,7 @@ export const makeAIClassifier = (): IAIClassifier => {
                 prompt: `${prompt}\n\n ${stripHtml(entry.title).result}\n${entry.content.length > 1000 ? stripHtml(entry.content).result : ""}`,
                 think: true,
             });
+            if (r.response === undefined) throw new Error("model returned no response");
             return r.response;
         },
     };

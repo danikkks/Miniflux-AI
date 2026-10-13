@@ -6,7 +6,7 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3, GROUP_CATEGORY, GROUP_FEED, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_SUB_CATEGORY, GROUP_SUB_FEED, GROUP_ENTRY_C, GROUP_DIGEST } from './fixtures.js';
-import { createClient, startServer, waitFor, waitForCount, eventually, json, type RecordedRequest } from './mockserver.js';
+import { createClient, startServer, waitFor, waitForCount, eventually, json, entryUpdate, type RecordedRequest } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
@@ -77,7 +77,7 @@ test('entry classified as "no" is marked as read', async () => {
 
     child = spawnApp();
     const req = await waitFor(mock, 'PUT', '/v1/entries');
-    const body = JSON.parse(req.body.string);
+    const body = entryUpdate(req);
     assert.deepEqual(body.entry_ids, [ENTRY.id]);
     assert.equal(body.status, 'read');
 });
@@ -143,7 +143,7 @@ test('decision api: entry classified as "no" is marked as read', async () => {
 
     child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
     const req = await waitFor(mock, 'PUT', '/v1/entries');
-    const body = JSON.parse(req.body.string);
+    const body = entryUpdate(req);
     assert.deepEqual(body.entry_ids, [ENTRY.id]);
     assert.equal(body.status, 'read');
 });
@@ -339,7 +339,7 @@ const mockGroupingSetup = async (entries: object[], categories: object[] = [GROU
     await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: FEED_PATH }, httpResponse: { statusCode: 200 } });
 };
 
-const items = (body: { string?: string; xml?: string }): string[] => (String(body.xml ?? body.string ?? body).match(/<item>[\s\S]*?<\/item>/g) ?? []);
+const items = (body: RecordedRequest['body']): string[] => ((body.xml ?? body.string).match(/<item>[\s\S]*?<\/item>/g) ?? []);
 
 test('grouping: articles about the same story are published as one feed item', async () => {
     await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
@@ -362,7 +362,7 @@ test('grouping: articles about different stories are published as separate feed 
     const put = await waitFor(mock, 'PUT', FEED_PATH);
     const published = items(put.body);
     assert.equal(published.length, 2);
-    const guids = published.map((i) => i.match(/<guid[^>]*>(.*?)<\/guid>/)![1]);
+    const guids = published.map((i) => i.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1]);
     assert.equal(new Set(guids).size, 2);
 });
 
@@ -372,7 +372,7 @@ test('grouping: grouped articles are marked as read in miniflux', async () => {
 
     child = spawnApp(DECISION_ENV);
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 2);
-    const bodies = reads.map((r) => JSON.parse(r.body.string));
+    const bodies = reads.map((r) => entryUpdate(r));
     assert.deepEqual(bodies.flatMap((b) => b.entry_ids).sort(), [GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
     assert.ok(bodies.every((b) => b.status === 'read'));
 });
@@ -409,7 +409,7 @@ test('grouping and filtering run side by side', async () => {
 
     child = spawnApp(DECISION_ENV);
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 3);
-    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids).sort();
+    const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids).sort();
     assert.deepEqual(readIds, [ENTRY.id, GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
     const put = await waitFor(mock, 'PUT', FEED_PATH);
     assert.equal(items(put.body).length, 1);
@@ -457,10 +457,10 @@ test('grouping: a digest is neither grouped nor marked as read', async () => {
     const published = items(put.body);
     assert.equal(published.length, 1);
     assert.match(published[0], new RegExp(GROUP_ENTRY_A.url));
-    assert.doesNotMatch(put.body.xml ?? put.body.string ?? String(put.body), new RegExp(GROUP_DIGEST.url));
+    assert.doesNotMatch(put.body.xml ?? put.body.string, new RegExp(GROUP_DIGEST.url));
 
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
-    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids);
     assert.deepEqual(readIds, [GROUP_ENTRY_A.id]);
 });
 
@@ -524,7 +524,7 @@ test('grouping: an entry whose classification fails does not block the others', 
     assert.doesNotMatch(published[0], new RegExp(GROUP_ENTRY_A.url));
 
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
-    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids);
     assert.deepEqual(readIds, [GROUP_ENTRY_B.id]);
 });
 
@@ -544,7 +544,7 @@ test('grouping: entries are left unread when the b2 settings are incomplete', as
     child = spawnApp({ ...DECISION_ENV, B2_BUCKET: '' });
     await new Promise((r) => setTimeout(r, 1500));
     const reads: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
-    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids);
     assert.deepEqual(readIds, []);
 });
 
@@ -566,7 +566,7 @@ test('grouping: a grouped entry whose mark-as-read failed is marked on the next 
     await mockDecision(0.9);
     child = spawnApp(DECISION_ENV);
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
-    const readIds = reads.flatMap((r) => JSON.parse(r.body.string).entry_ids);
+    const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids);
     assert.deepEqual(readIds, [GROUP_ENTRY_A.id]);
 });
 

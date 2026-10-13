@@ -190,6 +190,7 @@ export const run = async (
     const decisions: IDecision[] = await Promise.all(
         toVerify.map(async (entry) => {
             const prompt = findPromptForCategory(entry.feed.category.title, prompts);
+            if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
             return {
                 entry,
                 decision: await classifier.classify(entry, prompt.content),
@@ -245,7 +246,7 @@ export const runGrouping = async (
     console.debug("groupingUnreadEntries", unread.map((e) => e.title));
 
     const alreadyGrouped = new Set(await groups.groupedEntryIds(unread.map((e) => e.id)));
-    const stale = unread.filter((e) => alreadyGrouped.has(String(e.id)));
+    const stale = unread.filter((e) => alreadyGrouped.has(e.id));
     if (stale.length > 0) {
         try {
             await entryUpdater.markAsRead(stale.map((e) => e.id));
@@ -253,7 +254,7 @@ export const runGrouping = async (
             console.error(err);
         }
     }
-    const toGroup = unread.filter((e) => !alreadyGrouped.has(String(e.id)) && !digestIds.includes(e.id))
+    const toGroup = unread.filter((e) => !alreadyGrouped.has(e.id) && !digestIds.includes(e.id))
         .slice(0, batchSize);
     console.debug("groupingEntriesToGroup", toGroup.map((e) => e.title));
 

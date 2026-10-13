@@ -27,7 +27,7 @@ export const makeAISummarizer = (host: string, model: string): IGroupSummarizer 
                 },
                 think: false,
             });
-            const { title, description } = JSON.parse(r.response);
+            const { title, description } = JSON.parse(r.response ?? "") as { title?: string; description: string };
             if (!title?.trim()) throw new Error("summary has an empty title");
             return { title, description };
         },
