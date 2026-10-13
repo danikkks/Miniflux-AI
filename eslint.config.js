@@ -38,6 +38,16 @@ export default tseslint.config(
     },
   },
   {
+    files: ["test/**/*.ts"],
+    ignores: ["test/mockserver.ts"],
+    rules: {
+      "no-restricted-syntax": ["error", {
+        selector: "CallExpression[callee.name='setTimeout']",
+        message: "use eventually() to wait for a condition, or settle() to prove nothing happens",
+      }],
+    },
+  },
+  {
     files: ["src/sqlite-database.ts"],
     rules: { "@typescript-eslint/require-await": "off" },
   },

@@ -6,7 +6,7 @@ import { writeFile, unlink } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3, GROUP_CATEGORY, GROUP_FEED, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_SUB_CATEGORY, GROUP_SUB_FEED, GROUP_ENTRY_C, GROUP_DIGEST } from './fixtures.js';
-import { createClient, startServer, waitFor, waitForCount, eventually, json, entryUpdate, type RecordedRequest } from './mockserver.js';
+import { createClient, startServer, waitFor, waitForCount, eventually, settle, json, entryUpdate, type RecordedRequest } from './mockserver.js';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
@@ -124,7 +124,7 @@ test('entry classified as "yes" is not marked as read', async () => {
 
     child = spawnApp();
     await waitFor(mock, 'POST', '/api/generate');
-    await new Promise((r) => setTimeout(r, 300));
+    await settle(300);
     const putRequests: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
     assert.equal(putRequests.length, 0);
 });
@@ -157,7 +157,7 @@ test('decision api: model missing "decision" capability is never marked as read'
 
     child = spawnApp({ OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' });
     await waitFor(mock, 'POST', '/api/show');
-    await new Promise((r) => setTimeout(r, 300));
+    await settle(300);
     const putRequests: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
     assert.equal(putRequests.length, 0);
 });
@@ -169,7 +169,7 @@ test('category without matching prompt - no feeds fetched', async () => {
 
     child = spawnApp();
     await waitFor(mock, 'GET', '/v1/categories');
-    await new Promise((r) => setTimeout(r, 300));
+    await settle(300);
     const feedsRequests: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'GET', path: `/v1/categories/${sportsCategory.id}/feeds` })) ?? [];
     assert.equal(feedsRequests.length, 0);
 });
@@ -420,7 +420,7 @@ test('grouping: nothing is published when the decision api is turned off', async
     await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'yes', done: true }));
 
     child = spawnApp();
-    await new Promise((r) => setTimeout(r, 1500));
+    await settle(1500);
     const feedPuts: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: FEED_PATH })) ?? [];
     const generates: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'POST', path: '/api/generate' })) ?? [];
     assert.equal(feedPuts.length, 0);
@@ -542,7 +542,7 @@ test('grouping: entries are left unread when the b2 settings are incomplete', as
     await mockDecision(0.9);
 
     child = spawnApp({ ...DECISION_ENV, B2_BUCKET: '' });
-    await new Promise((r) => setTimeout(r, 1500));
+    await settle(1500);
     const reads: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
     const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids);
     assert.deepEqual(readIds, []);
@@ -603,7 +603,7 @@ test('review ui: discarding keeps the newest decisions and drops the rest from p
 
 test('review ui: discarding with an invalid keep value is rejected', async () => {
     child = spawnApp();
-    await new Promise((r) => setTimeout(r, 800));
+    await settle(800);
     const res = await fetch(`${WEB}/discard`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },

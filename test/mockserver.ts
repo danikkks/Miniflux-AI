@@ -32,6 +32,8 @@ export const startServer = async (port: number) => {
     throw new Error(`MockServer on port ${port} did not start within 60s`);
 };
 
+export const settle = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 export const waitFor = async (client: MockClient, method: string, path: string, ms = 10000) => {
     const deadline = Date.now() + ms;
     while (Date.now() < deadline) {
