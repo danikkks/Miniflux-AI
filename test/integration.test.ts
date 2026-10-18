@@ -40,7 +40,7 @@ const baseEnv = () => ({
 });
 
 const spawnApp = (env: Record<string, string> = {}) =>
-    spawn('node', ['bootstrap.js'], {
+    spawn('node', ['dist/bootstrap.js'], {
         cwd: ROOT,
         env: { ...process.env, ...baseEnv(), ...env },
         stdio: 'pipe',

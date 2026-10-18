@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```sh
 npm install        # install dependencies
-npm run build      # compile TypeScript (src/ -> project root)
+npm run build      # compile TypeScript (src/ -> dist/)
 npm run start      # build + run
 npm test           # build + run integration tests
 ./docker-build.sh  # build Docker image
@@ -36,14 +36,14 @@ test/
   integration.test.ts  -- black-box integration tests
   mockserver.ts        -- MockServer helpers (startServer, waitFor, json)
   fixtures.ts          -- shared test data
-custom-prompt-*.md -- user-defined prompts (placed at project root alongside compiled JS)
+custom-prompt-*.md -- user-defined prompts (read from the working directory)
 ```
 
 ### Data flow
 
 `bootstrap.ts` builds concrete implementations of the interfaces defined in `core/entities.ts`, passes them to the use case factories in `core/`, runs the returned use cases in a loop and serves the review UI. The entry filter:
 
-1. Load `custom-prompt-<category>.md` files from the compiled output directory
+1. Load `custom-prompt-<category>.md` files from the working directory
 2. Fetch Miniflux categories; keep only those whose titles contain a prompt's `<category>` (case-insensitive substring)
 3. Fetch unread entries for matching feeds, skip already-processed IDs, apply `PROCESSING_BATCH_SIZE`
 4. Classify each entry via AI; the classifier adapter parses the answer (case-insensitive, trimmed) into a boolean and throws on anything else; such entries are logged and retried next run. "no" -> mark as read, "yes" -> leave unread
@@ -80,7 +80,7 @@ Controlled by `AI_PROVIDER` env var:
 
 ### Custom prompts
 
-Files named `custom-prompt-<category>.md` placed in the project root (where JS is compiled). The `<category>` part must be a case-insensitive substring of a Miniflux category title. The file content is sent as the AI system prompt/instruction; the entry title and content are the input.
+Files named `custom-prompt-<category>.md` placed in the working directory (the project root for `npm start` and tests, `/app` in Docker). The `<category>` part must be a case-insensitive substring of a Miniflux category title. The file content is sent as the AI system prompt/instruction; the entry title and content are the input.
 
 
 ## Testing
@@ -88,7 +88,7 @@ Files named `custom-prompt-<category>.md` placed in the project root (where JS i
 ### Philosophy
 
 - Write integration tests only — never unit tests unless explicitly asked
-- Tests must be black-box: spawn the compiled `bootstrap.js` as a child process, configure it via environment variables, and assert on observable HTTP behavior. No imports from `src/`
+- Tests must be black-box: spawn the compiled `dist/bootstrap.js` as a child process, configure it via environment variables, and assert on observable HTTP behavior. No imports from `src/`
 - Mock external HTTP APIs (Miniflux, Ollama) with a real mock HTTP server — not SDK mocks or in-process stubs
 - Each test sets up its own mock expectations independently, even at the cost of some duplication. Shared stubs reduce flexibility
 

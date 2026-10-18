@@ -19,7 +19,7 @@ const noClasses = {
 };
 
 export default tseslint.config(
-  { ignores: ["*.js", "node_modules"] },
+  { ignores: ["*.js", "dist", "node_modules"] },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   { languageOptions: { parserOptions: { project: "./tsconfig.eslint.json", tsconfigRootDir: import.meta.dirname } } },

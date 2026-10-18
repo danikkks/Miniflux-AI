@@ -5,9 +5,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "npx tsc && node bootstrap.js",
+    "start": "npx tsc && node dist/bootstrap.js",
     "build": "npx tsc",
-    "inspect": "npx tsc && node --inspect bootstrap.js",
+    "inspect": "npx tsc && node --inspect dist/bootstrap.js",
     "lint": "depcruise --output-type err-long src test && eslint src test",
     "test": "npm run build && tsx --test test/integration.test.ts"
   },

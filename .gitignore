@@ -1,11 +1,10 @@
 node_modules
 .env
 custom-prompt-**
-**.js**
 logs.txt
 *.jar
 *.db
 data
-!eslint.config.js
+dist/
 reports/
 research_notes/

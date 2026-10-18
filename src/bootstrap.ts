@@ -2,7 +2,7 @@ import { makeEntryFilter } from "./core/filter-entries.js";
 import { makeStoryGrouper } from "./core/group-stories.js";
 import { makeReviewService } from "./core/review-decisions.js";
 import { makeMinifluxClient } from "./miniflux.js";
-import { promptLoader } from "./prompt-loader.js";
+import { makePromptLoader } from "./prompt-loader.js";
 import { makeAIClassifier } from "./ai-classifier.js";
 import { makeSqliteDatabase, makeSqliteGroupStore } from "./sqlite-database.js";
 import { makeAISummarizer } from "./ai-summarizer.js";
@@ -38,6 +38,7 @@ void (async () => {
         ollamaModel: process.env.OLLAMA_MODEL,
         useDecisionApi: process.env.OLLAMA_DECISION_API === "true",
     });
+    const promptLoader = makePromptLoader(process.cwd());
     const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
     const database = makeSqliteDatabase(databasePath);
     startWebUi(
