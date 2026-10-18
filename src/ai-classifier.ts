@@ -35,7 +35,14 @@ export const supportsDecisionApi = async (client: Ollama, model: string): Promis
     return info.capabilities.includes(DECISION_CAPABILITY);
 };
 
-const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEntry, prompt: string): Promise<string> => {
+const parseYesNo = (answer: string): boolean => {
+    const normalized = answer.toLowerCase().trim();
+    if (normalized === "yes") return true;
+    if (normalized === "no") return false;
+    throw new Error(`expected "yes" or "no", got "${answer}"`);
+};
+
+const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEntry, prompt: string): Promise<boolean> => {
     const title = stripHtml(entry.title).result;
     const body = entry.content.length > 1000 ? stripHtml(entry.content).result : "";
     let state = fitToBodyLimit(model, `${title}\n${body}`, prompt);
@@ -44,7 +51,7 @@ const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEn
         try {
             const r = await client.systemone(systemoneRequest(model, state, prompt));
             const answer = r.answers[DECISION_QUESTION_KEY];
-            return answer.type === "noul" && answer.noul >= 0.5 ? "yes" : "no";
+            return answer.type === "noul" && answer.noul >= 0.5;
         } catch (err) {
             const actualTokens = overflowTokenCount(err);
             if (actualTokens === null || attempt === SYSTEMONE_MAX_ATTEMPTS) throw err;
@@ -72,7 +79,7 @@ export const makeAIClassifier = (config: IAIClassifierConfig): IAIClassifier => 
                     instructions: prompt,
                     input: `# ${entry.title}\n${entry.content}`,
                 });
-                return r.output_text;
+                return parseYesNo(r.output_text);
             },
         };
     }
@@ -101,7 +108,7 @@ export const makeAIClassifier = (config: IAIClassifierConfig): IAIClassifier => 
                 think: true,
             });
             if (r.response === undefined) throw new Error("model returned no response");
-            return r.response;
+            return parseYesNo(r.response);
         },
     };
 };

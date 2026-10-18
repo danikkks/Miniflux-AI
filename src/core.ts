@@ -3,8 +3,6 @@ import { stripHtml } from "string-strip-html";
 export type ICategory = {
     id: string;
     title: string;
-    user_id: number;
-    hide_globally: boolean;
 };
 
 export type IFeed = {
@@ -20,9 +18,11 @@ export type IEntry = {
     feed: IFeed;
 };
 
+export type Decision = "yes" | "no";
+
 export type IDecision = {
     entry: IEntry;
-    decision: string;
+    decision: Decision;
 };
 
 export type Verdict = "correct" | "wrong";
@@ -33,7 +33,7 @@ export type IStoredDecision = {
     url: string;
     content: string;
     category: string;
-    decision: string;
+    decision: Decision;
     verdict: Verdict | null;
 };
 
@@ -67,7 +67,7 @@ export type IGroupSummary = {
 export type IGroup = {
     id: string;
     entries: IGroupedEntry[];
-    updatedAt: string;
+    updatedAt: Date;
     summary: IGroupSummary | null;
     summarizedCount: number;
 };
@@ -84,7 +84,7 @@ export interface IFeedReader {
 }
 
 export interface IAIClassifier {
-    classify(entry: IEntry, prompt: string): Promise<string>;
+    classify(entry: IEntry, prompt: string): Promise<boolean>;
 }
 
 export interface IEntryUpdater {
@@ -95,8 +95,10 @@ export interface IDatabase {
     saveDecisions(decisions: IDecision[]): Promise<void>;
     listUnreviewedDecisions(): Promise<IStoredDecision[]>;
     getDecisions(entryIds: string[]): Promise<IStoredDecision[]>;
-    listRecentVerdicts(parentCategory: string, limit: number): Promise<IStoredDecision[]>;
+    listVerdictCategories(): Promise<string[]>;
+    listRecentVerdicts(categories: string[], limit: number): Promise<IStoredDecision[]>;
     saveVerdicts(verdicts: IVerdict[]): Promise<void>;
+    resetVerdicts(entryIds: string[]): Promise<void>;
     markReviewed(entryIds: string[]): Promise<void>;
     discardUnreviewedExceptNewest(keep: number): Promise<void>;
 }
@@ -149,12 +151,29 @@ const filterUnprocessedEntries = (
     entries.filter((e) => !processedIds.includes(e.id)).slice(0, batchSize);
 
 const irrelevantEntryIds = (decisions: IDecision[]): string[] =>
-    decisions
-        .filter((d) => d.decision.toLowerCase().trim() === "no")
-        .map((d) => d.entry.id);
+    decisions.filter((d) => d.decision === "no").map((d) => d.entry.id);
 
-const validDecisions = (decisions: IDecision[]): IDecision[] =>
-    decisions.filter((d) => d.decision === "yes" || d.decision === "no");
+const changedDecisionIds = (decisions: IDecision[], previous: IStoredDecision[]): string[] => {
+    const before = new Map(previous.map((p) => [p.entryId, p.decision]));
+    return decisions
+        .filter((d) => before.has(d.entry.id) && before.get(d.entry.id) !== d.decision)
+        .map((d) => d.entry.id);
+};
+
+const classifyOrSkip = async (
+    classifier: IAIClassifier,
+    entry: IEntry,
+    prompts: ICustomPrompt[],
+): Promise<IDecision | null> => {
+    const prompt = findPromptForCategory(entry.feed.category.title, prompts);
+    if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
+    try {
+        return { entry, decision: (await classifier.classify(entry, prompt.content)) ? "yes" : "no" };
+    } catch (err) {
+        console.error(err);
+        return null;
+    }
+};
 
 export const run = async (
     feedReader: IFeedReader,
@@ -187,28 +206,22 @@ export const run = async (
     const toVerify = filterUnprocessedEntries(unreadEntries, processedIds, batchSize);
     console.debug("unreadEntriesToVerify", toVerify);
 
-    const decisions: IDecision[] = await Promise.all(
-        toVerify.map(async (entry) => {
-            const prompt = findPromptForCategory(entry.feed.category.title, prompts);
-            if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
-            return {
-                entry,
-                decision: await classifier.classify(entry, prompt.content),
-            };
-        }),
-    );
+    const decisions = (
+        await Promise.all(toVerify.map((entry) => classifyOrSkip(classifier, entry, prompts)))
+    ).filter((d): d is IDecision => d !== null);
     console.debug("aiDecisions", decisions);
 
     const toSkip = irrelevantEntryIds(decisions);
     const skipped = unreadEntries.filter((e) => toSkip.includes(e.id));
     console.debug("skipping", skipped.map((e) => e.title));
 
-    const valid = validDecisions(decisions);
-    await database.saveDecisions(valid);
+    const previous = await database.getDecisions(decisions.map((d) => d.entry.id));
+    await database.saveDecisions(decisions);
+    await database.resetVerdicts(changedDecisionIds(decisions, previous));
     if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
     console.debug("skipped", skipped.map((e) => e.title));
 
-    processedIds.push(...valid.map((d) => d.entry.id));
+    processedIds.push(...decisions.map((d) => d.entry.id));
 };
 
 const sameStoryPrompt = (group: IGroup): string =>
@@ -216,8 +229,6 @@ const sameStoryPrompt = (group: IGroup): string =>
 
 const DIGEST_PROMPT =
     "Is the article below a digest that covers several separate news stories? Answer yes or no.";
-
-const isYes = (answer: string): boolean => answer.toLowerCase().trim() === "yes";
 
 export const runGrouping = async (
     feedReader: IFeedReader,
@@ -262,14 +273,14 @@ export const runGrouping = async (
     console.debug("groupingOpenGroups", open.map((g) => ({ id: g.id, title: g.summary?.title ?? g.entries[0].title, entries: g.entries.length })));
     for (const entry of toGroup) {
         try {
-            if (isYes(await classifier.classify(entry, DIGEST_PROMPT))) {
+            if (await classifier.classify(entry, DIGEST_PROMPT)) {
                 digestIds.push(entry.id);
                 console.debug("groupingDigestSkipped", entry.title);
                 continue;
             }
             let match: IGroup | undefined;
             for (const group of open) {
-                if (isYes(await classifier.classify(entry, sameStoryPrompt(group)))) {
+                if (await classifier.classify(entry, sameStoryPrompt(group))) {
                     match = group;
                     break;
                 }
@@ -278,7 +289,7 @@ export const runGrouping = async (
             console.debug("groupingEntryGrouped", { entry: entry.title, group: id, new: !match });
             const member = { entryId: entry.id, title: entry.title, url: entry.url, content: entry.content };
             if (match) match.entries.push(member);
-            else open.unshift({ id, entries: [member], updatedAt: "", summary: null, summarizedCount: 0 });
+            else open.unshift({ id, entries: [member], updatedAt: new Date(), summary: null, summarizedCount: 0 });
             await entryUpdater.markAsRead([entry.id]);
         } catch (err) {
             console.error(err);
@@ -314,7 +325,7 @@ const toReviewItem = ({ content, ...rest }: IStoredDecision): IReviewItem => ({
     excerpt: stripHtml(content).result.slice(0, EXCERPT_LENGTH),
 });
 
-const oppositeDecision = (decision: string): string =>
+const oppositeDecision = (decision: Decision): Decision =>
     decision === "yes" ? "no" : "yes";
 
 const describeItem = (item: IReviewItem): string => {
@@ -365,12 +376,16 @@ export const makeReviewService = (
         const shown = (await database.getDecisions(shownIds)).map(toReviewItem);
         const prompts = await promptLoader.load();
         const parents = [...new Set(shown.map((i) => parentCategory(i.category)))];
+        const verdictCategories = await database.listVerdictCategories();
 
         const result = await Promise.all(parents.map(async (parent) => {
             const prompt = findPromptForCategory(parent, prompts);
             if (!prompt) return null;
             const history = (
-                await database.listRecentVerdicts(parent, REVIEW_HISTORY_SIZE)
+                await database.listRecentVerdicts(
+                    verdictCategories.filter((c) => parentCategory(c) === parent),
+                    REVIEW_HISTORY_SIZE,
+                )
             ).map(toReviewItem);
             return {
                 category: parent,

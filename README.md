@@ -1,6 +1,6 @@
 # Miniflux-AI
 
-Use AI to auto-classify [Miniflux](https://miniflux.app) feeds so only the important entries reach you.
+Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so only important news reach you.
 
 ## Quick Start
 - Install dependencies: `npm install`

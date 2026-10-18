@@ -4,6 +4,10 @@ Miniflux AI extensions allows to reduces the noise in an RSS feed by filtering o
 
 ## Requirements Overview
 
+1. Filtering of Miniflux feeds accordingly to the criterias described by a user in markdown format
+2. Grouping
+
+
 ## Quality Goals
 
 ## Stakeholders

@@ -7,3 +7,5 @@ logs.txt
 *.db
 data
 !eslint.config.js
+reports/
+research_notes/

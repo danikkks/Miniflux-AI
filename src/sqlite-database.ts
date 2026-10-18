@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { IDatabase, IGroup, IGroupStore, IStoredDecision, Verdict } from "./core.js";
+import type { Decision, IDatabase, IGroup, IGroupStore, IStoredDecision, Verdict } from "./core.js";
 
 type Row = {
     entry_id: number;
@@ -7,7 +7,7 @@ type Row = {
     url: string;
     content: string;
     category: string;
-    decision: string;
+    decision: Decision;
     verdict: Verdict | null;
 };
 
@@ -55,13 +55,10 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
         insert into decisions (entry_id, title, url, content, feed_id, category, decision)
         values (?, ?, ?, ?, ?, ?, ?)
         on conflict (entry_id) do update set
-            verdict = case when decision = excluded.decision then verdict end,
-            reviewed = case when decision = excluded.decision then reviewed else 0 end,
             decision = excluded.decision,
             decided_at = current_timestamp
     `);
     const setVerdict = db.prepare("update decisions set verdict = ?, verdict_at = current_timestamp where entry_id = ?");
-    const parentOf = "case when instr(category, ' / ') > 0 then substr(category, 1, instr(category, ' / ') - 1) else category end";
     const selectColumns = "entry_id, title, url, content, category, decision, verdict";
 
     return {
@@ -83,14 +80,26 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
                 .all(...entryIds) as Row[]).map(toStoredDecision);
         },
 
-        listRecentVerdicts: async (parentCategory, limit) =>
+        listVerdictCategories: async () =>
             (db
-                .prepare(`select ${selectColumns} from decisions where ${parentOf} = ? and verdict is not null order by verdict_at desc, entry_id desc limit ?`)
-                .all(parentCategory, limit) as Row[]).map(toStoredDecision),
+                .prepare("select distinct category from decisions where verdict is not null")
+                .all() as { category: string }[]).map((r) => r.category),
+
+        listRecentVerdicts: async (categories, limit) => {
+            const placeholders = categories.map(() => "?").join(",");
+            return (db
+                .prepare(`select ${selectColumns} from decisions where category in (${placeholders}) and verdict is not null order by verdict_at desc, entry_id desc limit ?`)
+                .all(...categories, limit) as Row[]).map(toStoredDecision);
+        },
 
         markReviewed: async (entryIds) => {
             const placeholders = entryIds.map(() => "?").join(",");
             db.prepare(`update decisions set reviewed = 1 where entry_id in (${placeholders})`).run(...entryIds);
+        },
+
+        resetVerdicts: async (entryIds) => {
+            const placeholders = entryIds.map(() => "?").join(",");
+            db.prepare(`update decisions set verdict = null, reviewed = 0 where entry_id in (${placeholders})`).run(...entryIds);
         },
 
         discardUnreviewedExceptNewest: async (keep) => {
@@ -115,6 +124,9 @@ export const makeSqliteDatabase = (path: string): IDatabase => {
         },
     };
 };
+
+const fromSqliteTimestamp = (timestamp: string): Date =>
+    new Date(`${timestamp.replace(" ", "T")}Z`);
 
 type GroupRow = {
     group_id: number;
@@ -174,16 +186,16 @@ export const makeSqliteGroupStore = (path: string): IGroupStore => {
                 const group = byId.get(r.group_id) ?? {
                     id: String(r.group_id),
                     entries: [],
-                    updatedAt: r.added_at,
+                    updatedAt: fromSqliteTimestamp(r.added_at),
                     summary: r.group_title === null ? null : { title: r.group_title, description: r.group_description ?? "" },
                     summarizedCount: r.summarized_count,
                 };
                 group.entries.push({ entryId: String(r.entry_id), title: r.title, url: r.url, content: r.content });
-                group.updatedAt = r.added_at;
+                group.updatedAt = fromSqliteTimestamp(r.added_at);
                 byId.set(r.group_id, group);
             }
             return [...byId.values()].sort(
-                (a, b) => b.updatedAt.localeCompare(a.updatedAt) || Number(b.id) - Number(a.id),
+                (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime() || Number(b.id) - Number(a.id),
             );
         },
 

@@ -7,9 +7,6 @@ const EXCERPT_LENGTH = 300;
 const escape = (s: string): string =>
     s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-const toDate = (sqliteTimestamp: string): Date =>
-    new Date(`${sqliteTimestamp.replace(" ", "T")}Z`);
-
 const describe = (group: IGroup): string =>
     `${group.summary ? `<p>${escape(group.summary.description)}</p>` : ""}<ul>${group.entries
         .map((e) => `<li><a href="${escape(e.url)}">${escape(e.title)}</a><br/>${escape(stripHtml(e.content).result.slice(0, EXCERPT_LENGTH))}</li>`)
@@ -19,12 +16,12 @@ const toItem = (group: IGroup): string => `<item>
 <title>${escape(group.summary?.title ?? group.entries[0].title)}</title>
 <link>${escape(group.entries[0].url)}</link>
 <guid isPermaLink="false">group-${group.id}</guid>
-<pubDate>${toDate(group.updatedAt).toUTCString()}</pubDate>
+<pubDate>${group.updatedAt.toUTCString()}</pubDate>
 <description><![CDATA[${describe(group)}]]></description>
 </item>`;
 
 const buildFeed = (groups: IGroup[], title: string, link: string): string => {
-    const lastBuild = groups[0] ? `\n<lastBuildDate>${toDate(groups[0].updatedAt).toUTCString()}</lastBuildDate>` : "";
+    const lastBuild = groups[0] ? `\n<lastBuildDate>${groups[0].updatedAt.toUTCString()}</lastBuildDate>` : "";
     return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
 <channel>

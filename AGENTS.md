@@ -42,8 +42,8 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 1. Load `custom-prompt-<category>.md` files from the compiled output directory
 2. Fetch Miniflux categories; keep only those whose titles contain a prompt's `<category>` (case-insensitive substring)
 3. Fetch unread entries for matching feeds, skip already-processed IDs, apply `PROCESSING_BATCH_SIZE`
-4. Classify each entry via AI; response "no" (exact, trimmed) -> mark as read, "yes" -> leave unread
-5. Save all decisions (yes and no) to the database, then add all decided entry IDs to the in-memory `processedIds` list to prevent re-processing
+4. Classify each entry via AI; the classifier adapter parses the answer (case-insensitive, trimmed) into a boolean and throws on anything else; such entries are logged and retried next run. "no" -> mark as read, "yes" -> leave unread
+5. Save all decisions to the database (a decision that differs from the stored one clears its verdict and returns it to the review queue), then add all decided entry IDs to the in-memory `processedIds` list to prevent re-processing
 
 ### Grouping
 

@@ -115,6 +115,23 @@ test('entry classified as "yes" is stored in sqlite with its decision', async ()
     });
 });
 
+test('answer with different case and surrounding whitespace is stored as a decision', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: ' No\n', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    await eventually(() => {
+        const db = new DatabaseSync(DB_FILE, { readOnly: true });
+        const rows = db.prepare('select entry_id, decision from decisions').all();
+        db.close();
+        assert.deepEqual(rows.map((r) => ({ ...r })), [{ entry_id: ENTRY.id, decision: 'no' }]);
+    });
+});
+
 test('entry classified as "yes" is not marked as read', async () => {
     await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
     await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
@@ -548,7 +565,7 @@ test('grouping: entries are left unread when the b2 settings are incomplete', as
     assert.deepEqual(readIds, []);
 });
 
-test('grouping: a grouped entry whose mark-as-read failed is marked on the next run', async () => {
+test('grouping: a grouped entry whose mark-as-read failed is marked on the next run without being classified again', async () => {
     await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [GROUP_CATEGORY]));
     await mock.mockAnyResponse(json('GET', `/v1/categories/${GROUP_CATEGORY.id}/feeds`, 200, [GROUP_FEED]));
     await mock.mockAnyResponse(json('GET', `/v1/feeds/${GROUP_FEED.id}/entries`, 200, { entries: [GROUP_ENTRY_A] }));
@@ -568,6 +585,8 @@ test('grouping: a grouped entry whose mark-as-read failed is marked on the next 
     const reads = await waitForCount(mock, 'PUT', '/v1/entries', 1);
     const readIds = reads.flatMap((r) => entryUpdate(r).entry_ids);
     assert.deepEqual(readIds, [GROUP_ENTRY_A.id]);
+    const classifications: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'POST', path: '/v1/systemone' })) ?? [];
+    assert.equal(classifications.length, 0);
 });
 
 test('review ui: discarding keeps the newest decisions and drops the rest from prompt history', async () => {
@@ -599,6 +618,42 @@ test('review ui: discarding keeps the newest decisions and drops the rest from p
     const prompt = await review.text();
     assert.match(prompt, new RegExp(ENTRY_2.title));
     assert.doesNotMatch(prompt, new RegExp(ENTRY.title));
+});
+
+test('review ui: a changed decision brings the entry back for review without its verdict', async () => {
+    const mockFilter = async (answer: string) => {
+        await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+        await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+        await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY] }));
+        await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+        await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: answer, done: true }));
+    };
+    const post = (path: string, params: string[][]) =>
+        fetch(`${WEB}${path}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(params),
+        });
+
+    await mockFilter('yes');
+    child = spawnApp();
+    await eventually(async () => {
+        assert.match(await (await fetch(`${WEB}/pending`)).text(), new RegExp(ENTRY.title));
+    });
+    await post('/review', [['reviewed', String(ENTRY.id)], ['wrong', String(ENTRY.id)]]);
+    await post('/reviewed', [['reviewed', String(ENTRY.id)]]);
+    const exited = once(child, 'exit');
+    child.kill();
+    await exited;
+
+    await mock.reset();
+    await mockFilter('no');
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const pending = await (await fetch(`${WEB}/pending`)).text();
+    assert.match(pending, new RegExp(ENTRY.title));
+    assert.match(pending, /class="badge no"/);
+    assert.doesNotMatch(pending, /checked/);
 });
 
 test('review ui: discarding with an invalid keep value is rejected', async () => {
