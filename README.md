@@ -23,7 +23,21 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `GROUPING_WINDOW_HOURS`: Optional time after its last article during which a group still accepts new ones, and stays in the feed (default: 48).
 - Run the script: `npm run start`
 
+## Prompt files
+Filtering is driven by prompt files in the working directory (the project root for `npm run start`, `/app` in Docker):
+- Name each file `custom-prompt-<category>.md`, e.g. `custom-prompt-tech.md`.
+- `<category>` is matched as a case-insensitive substring of Miniflux category titles, so `tech` also covers a category "Tech News". Categories matching no prompt file are ignored.
+- The file content is sent to the AI as the system prompt; the entry title and content are the input. Describe which entries to keep and tell the model to answer only `yes` (keep unread) or `no` (mark as read). Any other answer is logged and the entry is retried next run.
+- Prompt files are read on each run, so no restart is needed after editing one.
+
+Example `custom-prompt-tech.md`:
+```
+You filter tech news. Answer "yes" if the article covers a major product launch,
+a security incident or a significant industry change. Answer "no" for opinion
+pieces, deals, rumors and tutorials. Answer with only yes or no.
+```
+
 ## To-Do (prioritized)
 - [x] document environment variables
-- [ ] document how to create prompt files
+- [x] document how to create prompt files
 - [ ] support more AI providers: Ollama, Claude, etc.
