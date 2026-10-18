@@ -1,6 +1,6 @@
 import { Ollama } from "ollama/dist/index.cjs";
 import { stripHtml } from "string-strip-html";
-import type { IGroup, IGroupSummarizer } from "./core.js";
+import type { IGroup, IGroupSummarizer } from "./core/entities.js";
 
 const MAX_ARTICLES = 10;
 const EXCERPT_LENGTH = 500;

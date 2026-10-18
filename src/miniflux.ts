@@ -4,7 +4,7 @@ import type {
     IEntry,
     IFeedReader,
     IEntryUpdater,
-} from "./core.js";
+} from "./core/entities.js";
 
 type MinifluxCategory = { id: number; title: string };
 type MinifluxFeed = { id: number; category: MinifluxCategory };

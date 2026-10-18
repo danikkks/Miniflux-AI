@@ -1,7 +1,7 @@
 import { OpenAI } from "openai";
 import { Ollama } from "ollama/dist/index.cjs";
 import { stripHtml } from "string-strip-html";
-import type { IAIClassifier, IEntry } from "./core.js";
+import type { IAIClassifier, IEntry } from "./core/entities.js";
 
 const DECISION_CAPABILITY = "decision";
 const DECISION_QUESTION_KEY = "relevant";

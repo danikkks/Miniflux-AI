@@ -1,4 +1,6 @@
-import { run, runGrouping, makeReviewService } from "./core.js";
+import { makeEntryFilter } from "./core/filter-entries.js";
+import { makeStoryGrouper } from "./core/group-stories.js";
+import { makeReviewService } from "./core/review-decisions.js";
 import { makeMinifluxClient } from "./miniflux.js";
 import { promptLoader } from "./prompt-loader.js";
 import { makeAIClassifier } from "./ai-classifier.js";
@@ -38,7 +40,6 @@ void (async () => {
     });
     const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
     const database = makeSqliteDatabase(databasePath);
-    const processedIds: string[] = [];
     startWebUi(
         makeReviewService(database, promptLoader),
         parseInt(process.env.WEB_PORT || "3000"),
@@ -73,15 +74,27 @@ void (async () => {
             feedTitle: process.env.GROUPED_FEED_TITLE || "Grouped articles",
             feedLink: requireEnv("MINIFLUX_URL"),
         });
-        const digestIds: string[] = [];
         const windowHours = parseInt(process.env.GROUPING_WINDOW_HOURS || "48");
-        steps.push(() =>
-            runGrouping(miniflux, classifier, miniflux, groups, summarizer, publisher, groupingCategories, windowHours, batchSize, digestIds),
-        );
+        steps.push(makeStoryGrouper({
+            feedReader: miniflux,
+            classifier,
+            entryUpdater: miniflux,
+            groups,
+            summarizer,
+            publisher,
+            categoryTitles: groupingCategories,
+            windowHours,
+            batchSize,
+        }));
     }
-    steps.push(() =>
-        run(miniflux, promptLoader, classifier, miniflux, database, processedIds, batchSize),
-    );
+    steps.push(makeEntryFilter({
+        feedReader: miniflux,
+        promptLoader,
+        classifier,
+        entryUpdater: miniflux,
+        decisionStore: database,
+        batchSize,
+    }));
 
     if (process.env.RUN_SEQUENTIALLY === "true") {
         await loop(intervalMs, async () => {

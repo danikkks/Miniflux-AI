@@ -19,11 +19,15 @@ This is a TypeScript/Node.js ESM service that polls Miniflux for unread feed ent
 
 ```
 src/
-  core.ts           -- domain types, interfaces (ports), run() pipeline, makeReviewService()
+  core/
+    entities.ts         -- domain types, interfaces (ports), shared domain rules
+    filter-entries.ts   -- makeEntryFilter(): classify unread entries, mark irrelevant ones read
+    group-stories.ts    -- makeStoryGrouper(): group same-story entries, summarize, publish feed
+    review-decisions.ts -- makeReviewService(): review queue and prompt-tweak text
   miniflux.ts       -- Miniflux REST API client
   ai-classifier.ts  -- IAIClassifier implementations (Ollama + OpenAI)
   web-ui.ts         -- inbound adapter: htmx review UI (node:http), depends on IReviewService
-  sqlite-database.ts -- IDatabase implementation (node:sqlite)
+  sqlite-database.ts -- IDecisionStore, IReviewStore and IGroupStore implementations (node:sqlite)
   ai-summarizer.ts  -- IGroupSummarizer implementation (Ollama generate)
   b2-feed-publisher.ts -- IFeedPublisher implementation (builds the RSS xml, uploads it to Backblaze B2 via S3 api)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
@@ -37,7 +41,7 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 
 ### Data flow
 
-`bootstrap.ts` builds concrete implementations of the interfaces defined in `core.ts`, then delegates to `run()` and serves the review UI:
+`bootstrap.ts` builds concrete implementations of the interfaces defined in `core/entities.ts`, passes them to the use case factories in `core/`, runs the returned use cases in a loop and serves the review UI. The entry filter:
 
 1. Load `custom-prompt-<category>.md` files from the compiled output directory
 2. Fetch Miniflux categories; keep only those whose titles contain a prompt's `<category>` (case-insensitive substring)
@@ -47,21 +51,22 @@ custom-prompt-*.md -- user-defined prompts (placed at project root alongside com
 
 ### Grouping
 
-When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DECISION_API=true`, and `OLLAMA_SUMMARY_MODEL` set; otherwise grouping is skipped with a warning), `bootstrap.ts` runs `runGrouping()` in its own loop, in parallel with `run()` (races on Miniflux are accepted), or, with `RUN_SEQUENTIALLY=true`, before `run()` in a single loop. For each unread entry of those categories (and their "Parent / Child" subcategories), the classifier is asked, one group at a time, per open group (updated within `GROUPING_WINDOW_HOURS`) whether the entry is about the same story as the group's first entry; first "yes" wins, otherwise a new group starts. Entries the classifier calls a digest (several separate stories) are skipped: not grouped, not marked read, remembered in memory. Once all decisions of a run are done, groups whose member count changed get a generated title and description (`ai-summarizer.ts`, Ollama `generate` with `OLLAMA_SUMMARY_MODEL`); the title also replaces the first article's title in later same-story questions. Each entry is marked as read right after it is stored and a failing entry is only logged and retried next run (grouped entries still unread are re-marked first). Grouped entries are marked as read, groups live in the same SQLite file, and the whole feed (one item per group, guid `group-<id>`) is uploaded to B2 when it changed. Miniflux subscribes to the public object URL.
+When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DECISION_API=true`, and `OLLAMA_SUMMARY_MODEL` set; otherwise grouping is skipped with a warning), `bootstrap.ts` runs the story grouper in its own loop, in parallel with the entry filter (races on Miniflux are accepted), or, with `RUN_SEQUENTIALLY=true`, before the entry filter in a single loop. For each unread entry of those categories (and their "Parent / Child" subcategories), the classifier is asked, one group at a time, per open group (updated within `GROUPING_WINDOW_HOURS`) whether the entry is about the same story as the group's first entry; first "yes" wins, otherwise a new group starts. Entries the classifier calls a digest (several separate stories) are skipped: not grouped, not marked read, remembered in memory. Once all decisions of a run are done, groups whose member count changed get a generated title and description (`ai-summarizer.ts`, Ollama `generate` with `OLLAMA_SUMMARY_MODEL`); the title also replaces the first article's title in later same-story questions. Each entry is marked as read right after it is stored and a failing entry is only logged and retried next run (grouped entries still unread are re-marked first). Grouped entries are marked as read, groups live in the same SQLite file, and the whole feed (one item per group, guid `group-<id>`) is uploaded to B2 when it changed. Miniflux subscribes to the public object URL.
 
 ### Review UI
 
 `web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user ticks the wrong ones. Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. A "keep newest N" slider above the list discards older unreviewed decisions (`POST /discard`): they leave the queue with no verdict, so they never reach the prompt history; rows that already have a verdict are kept. The user applies the result to the prompt file manually.
 
-### Interfaces (`core.ts`)
+### Interfaces (`core/entities.ts`)
 
 | Interface | Implemented by |
 |---|---|
 | `IFeedReader` | `makeMinifluxClient()` in `miniflux.ts` |
 | `IEntryUpdater` | `makeMinifluxClient()` in `miniflux.ts` |
 | `IAIClassifier` | `makeAIClassifier()` in `ai-classifier.ts` |
-| `IDatabase` | `makeSqliteDatabase()` in `sqlite-database.ts` |
-| `IReviewService` | `makeReviewService()` in `core.ts`, consumed by `web-ui.ts` |
+| `IDecisionStore` | `makeSqliteDatabase()` in `sqlite-database.ts`, consumed by the entry filter |
+| `IReviewStore` | `makeSqliteDatabase()` in `sqlite-database.ts`, consumed by the review service |
+| `IReviewService` | `makeReviewService()` in `core/review-decisions.ts`, consumed by `web-ui.ts` |
 | `IGroupStore` | `makeSqliteGroupStore()` in `sqlite-database.ts` |
 | `IGroupSummarizer` | `makeAISummarizer()` in `ai-summarizer.ts` |
 | `IFeedPublisher` | `makeB2FeedPublisher()` in `b2-feed-publisher.ts` |

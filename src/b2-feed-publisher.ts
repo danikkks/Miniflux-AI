@@ -1,6 +1,6 @@
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { stripHtml } from "string-strip-html";
-import type { IFeedPublisher, IGroup } from "./core.js";
+import type { IFeedPublisher, IGroup } from "./core/entities.js";
 
 const EXCERPT_LENGTH = 300;
 

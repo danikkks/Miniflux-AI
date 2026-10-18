@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import type { Decision, IDatabase, IGroup, IGroupStore, IStoredDecision, Verdict } from "./core.js";
+import type { Decision, IDecisionStore, IGroup, IGroupStore, IReviewStore, IStoredDecision, Verdict } from "./core/entities.js";
 
 type Row = {
     entry_id: number;
@@ -21,7 +21,7 @@ const toStoredDecision = (r: Row): IStoredDecision => ({
     verdict: r.verdict,
 });
 
-export const makeSqliteDatabase = (path: string): IDatabase => {
+export const makeSqliteDatabase = (path: string): IDecisionStore & IReviewStore => {
     const db = new DatabaseSync(path);
     db.exec(`
         create table if not exists decisions (

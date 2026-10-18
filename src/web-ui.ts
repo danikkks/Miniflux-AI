@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { IReviewItem, IReviewPrompt, IReviewService } from "./core.js";
+import type { IReviewItem, IReviewPrompt, IReviewService } from "./core/entities.js";
 
 const ESCAPES: Record<string, string> = {
     "&": "&amp;",
