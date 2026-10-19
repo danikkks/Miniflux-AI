@@ -371,6 +371,23 @@ test('grouping: articles about the same story are published as one feed item', a
     assert.match(put.headers['content-type'][0], /rss\+xml/);
 });
 
+test('grouping: miniflux refreshes only the feed subscribed to the published file', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+    await mock.mockAnyResponse(json('GET', '/v1/feeds', 200, [
+        { id: 98, feed_url: 'http://example.com/grouped.xml' },
+        { id: 99, feed_url: `http://localhost:${PORT}${FEED_PATH}` },
+    ]));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/feeds/.*/refresh' }, httpResponse: { statusCode: 204 } });
+
+    child = spawnApp(DECISION_ENV);
+    await waitFor(mock, 'PUT', '/v1/feeds/99/refresh');
+    const all: RecordedRequest[] = (await mock.retrieveRecordedRequests({})) ?? [];
+    const paths = all.map((r) => r.path);
+    assert.ok(paths.indexOf(FEED_PATH) < paths.indexOf('/v1/feeds/99/refresh'));
+    assert.ok(!paths.includes('/v1/feeds/98/refresh'));
+});
+
 test('grouping: articles about different stories are published as separate feed items', async () => {
     await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await mockDecision(0.1);

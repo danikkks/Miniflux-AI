@@ -58,11 +58,18 @@ export const makeB2FeedPublisher = (config: B2Config): IFeedPublisher => {
     let lastPublished = "";
 
     return {
+        isPublishedAt: (feedUrl) => {
+            if (!URL.canParse(feedUrl)) return false;
+            const { hostname, pathname } = new URL(feedUrl);
+            const inBucket = pathname.includes(`/${config.bucket}/`) || hostname.startsWith(`${config.bucket}.`);
+            return inBucket && pathname.endsWith(`/${config.objectKey}`);
+        },
+
         publish: async (groups) => {
             const xml = buildFeed(groups, config.feedTitle, config.feedLink);
             if (xml === lastPublished) {
                 console.debug("feedUnchanged, upload skipped");
-                return;
+                return false;
             }
             await client.send(new PutObjectCommand({
                 Bucket: config.bucket,
@@ -73,6 +80,7 @@ export const makeB2FeedPublisher = (config: B2Config): IFeedPublisher => {
             }));
             lastPublished = xml;
             console.debug("feedUploaded", `${config.bucket}/${config.objectKey}`, xml.length);
+            return true;
         },
     };
 };

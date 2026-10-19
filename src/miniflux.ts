@@ -4,6 +4,8 @@ import type {
     IEntry,
     IFeedReader,
     IEntryUpdater,
+    IFeedRefresher,
+    ISubscribedFeed,
 } from "./core/entities.js";
 
 type MinifluxCategory = { id: number; title: string };
@@ -25,7 +27,7 @@ const toEntry = (e: MinifluxEntry): IEntry => ({
 export const makeMinifluxClient = (
     baseUrl: string,
     authToken: string,
-): IFeedReader & IEntryUpdater => {
+): IFeedReader & IEntryUpdater & IFeedRefresher => {
     const headers = () => new Headers({ "X-Auth-Token": authToken });
 
     return {
@@ -55,6 +57,17 @@ export const makeMinifluxClient = (
                 body: JSON.stringify({ status: "read", entry_ids: entryIds.map(Number) }),
             });
             if (!r.ok) throw new Error(`marking entries as read failed: ${r.status}`);
+        },
+
+        listSubscribedFeeds: async () => {
+            const r = await fetch(`${baseUrl}/v1/feeds`, { headers: headers() });
+            return (await (r.json() as Promise<{ id: number; feed_url: string }[]>))
+                .map((f): ISubscribedFeed => ({ id: String(f.id), url: f.feed_url }));
+        },
+
+        refreshFeed: async (feedId) => {
+            const r = await fetch(`${baseUrl}/v1/feeds/${feedId}/refresh`, { method: "PUT", headers: headers() });
+            if (!r.ok) throw new Error(`refreshing feed ${feedId} failed: ${r.status}`);
         },
     };
 };

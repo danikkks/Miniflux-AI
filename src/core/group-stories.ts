@@ -4,6 +4,7 @@ import type {
     IEntryUpdater,
     IFeedPublisher,
     IFeedReader,
+    IFeedRefresher,
     IGroup,
     IGroupStore,
     IGroupSummarizer,
@@ -22,6 +23,7 @@ export type StoryGrouperDeps = {
     groups: IGroupStore;
     summarizer: IGroupSummarizer;
     publisher: IFeedPublisher;
+    feedRefresher: IFeedRefresher;
     categoryTitles: string[];
     windowHours: number;
     batchSize: number;
@@ -34,6 +36,7 @@ export const makeStoryGrouper = ({
     groups,
     summarizer,
     publisher,
+    feedRefresher,
     categoryTitles,
     windowHours,
     batchSize,
@@ -108,6 +111,9 @@ export const makeStoryGrouper = ({
 
         const published = await groups.listGroupsSince(windowHours);
         console.debug("groupingPublishing", published.length);
-        await publisher.publish(published);
+        if (!(await publisher.publish(published))) return;
+        const subscriptions = (await feedRefresher.listSubscribedFeeds()).filter((f) => publisher.isPublishedAt(f.url));
+        console.debug("groupingRefreshingFeeds", subscriptions);
+        await Promise.all(subscriptions.map((f) => feedRefresher.refreshFeed(f.id)));
     };
 };

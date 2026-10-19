@@ -83,6 +83,7 @@ void (async () => {
             groups,
             summarizer,
             publisher,
+            feedRefresher: miniflux,
             categoryTitles: groupingCategories,
             windowHours,
             batchSize,

@@ -18,6 +18,11 @@ export type IEntry = {
 
 export type Decision = "yes" | "no";
 
+export type ISubscribedFeed = {
+    id: string;
+    url: string;
+};
+
 export type IDecision = {
     entry: IEntry;
     decision: Decision;
@@ -117,7 +122,13 @@ export interface IGroupSummarizer {
 }
 
 export interface IFeedPublisher {
-    publish(groups: IGroup[]): Promise<void>;
+    publish(groups: IGroup[]): Promise<boolean>;
+    isPublishedAt(feedUrl: string): boolean;
+}
+
+export interface IFeedRefresher {
+    listSubscribedFeeds(): Promise<ISubscribedFeed[]>;
+    refreshFeed(feedId: string): Promise<void>;
 }
 
 export interface IPromptLoader {
