@@ -15,44 +15,52 @@ const COPY_SCRIPT =
     "const t=this.closest('section').querySelector('textarea');t.select();" +
     "(navigator.clipboard?.writeText(t.value)??Promise.reject()).catch(()=>document.execCommand('copy'))";
 
-const itemRow = (i: IReviewItem): string => `
-    <li>
-        <input type="hidden" name="reviewed" value="${esc(i.entryId)}">
+type FormVerdicts = Map<string, string>;
+
+const VERDICT_PREFIX = "verdict-";
+
+const verdictsFromForm = (body: URLSearchParams): FormVerdicts =>
+    new Map([...body]
+        .filter(([name]) => name.startsWith(VERDICT_PREFIX))
+        .map(([name, value]) => [name.slice(VERDICT_PREFIX.length), value]));
+
+const verdictRadio = (i: IReviewItem, formVerdicts: FormVerdicts, verdict: string): string => `
         <label>
-            <input type="checkbox" name="wrong" value="${esc(i.entryId)}"${i.verdict === "wrong" ? " checked" : ""}>
-            wrong
-        </label>
+            <input type="radio" name="${VERDICT_PREFIX}${esc(i.entryId)}" value="${verdict}"${(formVerdicts.get(i.entryId) ?? i.verdict) === verdict ? " checked" : ""}>
+            ${verdict}
+        </label>`;
+
+const itemRow = (formVerdicts: FormVerdicts) => (i: IReviewItem): string => `
+    <li>${verdictRadio(i, formVerdicts, "correct")}${verdictRadio(i, formVerdicts, "wrong")}
         <span class="badge ${esc(i.decision)}">${esc(i.decision)}</span>
         <a href="${esc(i.url)}" target="_blank" rel="noopener">${esc(i.title)}</a>
         <small>${esc(i.category)}</small>
         <details><summary>excerpt</summary>${esc(i.excerpt)}</details>
     </li>`;
 
-const DISCARD_OUTPUT_SCRIPT = "this.nextElementSibling.value=this.value";
-
-const discardForm = (total: number): string => `
-    <form hx-post="/discard" hx-target="#step" hx-confirm="Discard the older unreviewed decisions? They will not be used for prompt improvement.">
+const discardForm = (total: number): string => total === 0 ? "" : `
+    <form hx-post="/discard" hx-target="#step" hx-include="#review" hx-disabled-elt="find button" hx-confirm="Discard the older unreviewed decisions? They will not be used for prompt improvement.">
         <label>keep newest
-            <input type="range" name="keep" min="0" max="${total}" value="${total}" oninput="${DISCARD_OUTPUT_SCRIPT}">
-            <output>${total}</output>
+            <input type="number" name="keep" min="0" max="${total}" value="${total}" required>
+            of ${total} without a verdict
         </label>
         <button type="submit">discard the rest</button>
     </form>`;
 
-const pendingStep = (items: IReviewItem[]): string =>
+const pendingStep = (items: IReviewItem[], formVerdicts: FormVerdicts = new Map()): string =>
     items.length === 0
         ? `<p>nothing to review</p>`
-        : `<h2>1. mark the wrong decisions (${items.length} unreviewed)</h2>
-    ${discardForm(items.length)}
-    <form hx-post="/review" hx-target="#step">
-        <ul>${items.map(itemRow).join("")}</ul>
+        : `<h2>1. mark the decisions you reviewed as correct or wrong (${items.length} unreviewed)</h2>
+    ${discardForm(items.filter((i) => i.verdict === null).length)}
+    <form id="review" hx-post="/review" hx-target="#step" hx-disabled-elt="find button">
+        <ul>${items.map(itemRow(formVerdicts)).join("")}</ul>
         <button type="submit">review done</button>
     </form>`;
 
 const promptCard = (p: IReviewPrompt): string => `
     <section>
         <h3>${esc(p.category)}</h3>
-        <form hx-post="/reviewed" hx-target="find .status" hx-swap="innerHTML">
+        <form hx-post="/reviewed" hx-target="find .status" hx-disabled-elt="find button" hx-swap="innerHTML">
             ${p.entryIds.map((id) => `<input type="hidden" name="reviewed" value="${esc(id)}">`).join("")}
             <button type="submit" onclick="${esc(COPY_SCRIPT)}">copy prompt</button>
             <span class="status"></span>
@@ -63,7 +71,7 @@ const promptCard = (p: IReviewPrompt): string => `
 const promptsStep = (prompts: IReviewPrompt[]): string => `
     <h2>2. copy the prompt (marks these decisions as reviewed) and ask a stronger model to improve it</h2>
     ${prompts.length === 0 ? "<p>no custom prompt matches the reviewed categories</p>" : prompts.map(promptCard).join("")}
-    <button hx-get="/pending" hx-target="#step">review more</button>`;
+    <button hx-get="/pending" hx-target="#step" hx-disabled-elt="this">review more</button>`;
 
 const page = (step: string): string => `<!doctype html>
 <html>
@@ -78,10 +86,18 @@ const page = (step: string): string => `<!doctype html>
         .badge.yes { background: seagreen; }
         .badge.no { background: firebrick; }
         textarea { width: 100%; font-family: monospace; }
+        #error { color: firebrick; }
     </style>
+    <script>
+        const showError = (text) => { document.getElementById("error").textContent = text; };
+        document.addEventListener("htmx:beforeRequest", () => showError(""));
+        document.addEventListener("htmx:responseError", (e) => showError(e.detail.xhr.responseText || "request failed"));
+        document.addEventListener("htmx:sendError", () => showError("server unreachable"));
+    </script>
 </head>
 <body>
     <h1>Decision review</h1>
+    <p id="error" role="alert"></p>
     <div id="step">${step}</div>
 </body>
 </html>`;
@@ -109,19 +125,27 @@ export const startWebUi = (service: IReviewService, port: number) => {
                 return;
             }
             if (req.method === "POST" && req.url === "/review") {
-                const body = await readBody(req);
-                const prompts = await service.submitReview(body.getAll("reviewed"), body.getAll("wrong"));
+                const formVerdicts = verdictsFromForm(await readBody(req));
+                if (formVerdicts.size === 0) {
+                    send(res, 400, "mark at least one decision as correct or wrong");
+                    return;
+                }
+                const prompts = await service.submitReview(
+                    [...formVerdicts.keys()],
+                    [...formVerdicts].filter(([, verdict]) => verdict === "wrong").map(([id]) => id),
+                );
                 send(res, 200, promptsStep(prompts));
                 return;
             }
             if (req.method === "POST" && req.url === "/discard") {
-                const keep = parseInt((await readBody(req)).get("keep") ?? "");
+                const body = await readBody(req);
+                const keep = parseInt(body.get("keep") ?? "");
                 if (!(keep >= 0)) {
                     send(res, 400, "keep must be a non-negative number");
                     return;
                 }
                 await service.discardPending(keep);
-                send(res, 200, pendingStep(await service.listPending()));
+                send(res, 200, pendingStep(await service.listPending(), verdictsFromForm(body)));
                 return;
             }
             if (req.method === "POST" && req.url === "/reviewed") {

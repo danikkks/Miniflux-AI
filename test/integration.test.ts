@@ -207,7 +207,7 @@ test('review ui: marking a decision wrong yields a prompt-tweak text for the cat
     const review = await fetch(`${WEB}/review`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams([['reviewed', String(ENTRY.id)], ['wrong', String(ENTRY.id)]]),
+        body: new URLSearchParams([[`verdict-${ENTRY.id}`, 'wrong']]),
     });
     const prompt = await review.text();
     assert.ok(prompt.includes(PROMPT.content));
@@ -216,7 +216,7 @@ test('review ui: marking a decision wrong yields a prompt-tweak text for the cat
 
     const stillPending = await (await fetch(`${WEB}/pending`)).text();
     assert.match(stillPending, new RegExp(ENTRY.title));
-    assert.match(stillPending, /name="wrong" value="100" checked/);
+    assert.match(stillPending, /name="verdict-100" value="wrong" checked/);
 
     await fetch(`${WEB}/reviewed`, {
         method: 'POST',
@@ -239,7 +239,7 @@ test('review ui: decision not marked wrong is reported as correct', async () => 
         const review = await fetch(`${WEB}/review`, {
             method: 'POST',
             headers: { 'content-type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams([['reviewed', String(ENTRY.id)]]),
+            body: new URLSearchParams([[`verdict-${ENTRY.id}`, 'correct']]),
         });
         const prompt = await review.text();
         assert.match(prompt, /Wrong decisions \(0\)/);
@@ -264,10 +264,10 @@ test('review ui: prompt includes decisions reviewed in earlier rounds', async ()
             body: new URLSearchParams(params),
         });
 
-    await post('/review', [['reviewed', String(ENTRY.id)], ['wrong', String(ENTRY.id)]]);
+    await post('/review', [[`verdict-${ENTRY.id}`, 'wrong']]);
     await post('/reviewed', [['reviewed', String(ENTRY.id)]]);
 
-    const second = await (await post('/review', [['reviewed', String(ENTRY_2.id)]])).text();
+    const second = await (await post('/review', [[`verdict-${ENTRY_2.id}`, 'correct']])).text();
     assert.ok(second.includes(ENTRY.title));
     assert.ok(second.includes(ENTRY_2.title));
     assert.match(second, /Wrong decisions \(1\)/);
@@ -310,9 +310,8 @@ test('review ui: subcategories share one prompt with their parent category', asy
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams([
-            ['reviewed', String(ENTRY.id)],
-            ['reviewed', String(ENTRY_3.id)],
-            ['wrong', String(ENTRY_3.id)],
+            [`verdict-${ENTRY.id}`, 'correct'],
+            [`verdict-${ENTRY_3.id}`, 'wrong'],
         ]),
     });
     const html = await review.text();
@@ -616,7 +615,7 @@ test('review ui: discarding keeps the newest decisions and drops the rest from p
     child = spawnApp();
     await waitFor(mock, 'PUT', '/v1/entries');
     const pending = await (await fetch(WEB)).text();
-    assert.match(pending, /type="range" name="keep" min="0" max="2" value="2"/);
+    assert.match(pending, /type="number" name="keep" min="0" max="2" value="2"/);
 
     const discard = await fetch(`${WEB}/discard`, {
         method: 'POST',
@@ -630,7 +629,7 @@ test('review ui: discarding keeps the newest decisions and drops the rest from p
     const review = await fetch(`${WEB}/review`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams([['reviewed', String(ENTRY_2.id)], ['wrong', String(ENTRY_2.id)]]),
+        body: new URLSearchParams([[`verdict-${ENTRY_2.id}`, 'wrong']]),
     });
     const prompt = await review.text();
     assert.match(prompt, new RegExp(ENTRY_2.title));
@@ -657,7 +656,7 @@ test('review ui: a changed decision brings the entry back for review without its
     await eventually(async () => {
         assert.match(await (await fetch(`${WEB}/pending`)).text(), new RegExp(ENTRY.title));
     });
-    await post('/review', [['reviewed', String(ENTRY.id)], ['wrong', String(ENTRY.id)]]);
+    await post('/review', [[`verdict-${ENTRY.id}`, 'wrong']]);
     await post('/reviewed', [['reviewed', String(ENTRY.id)]]);
     const exited = once(child, 'exit');
     child.kill();
@@ -682,4 +681,56 @@ test('review ui: discarding with an invalid keep value is rejected', async () =>
         body: new URLSearchParams([['keep', 'abc']]),
     });
     assert.equal(res.status, 400);
+});
+
+test('review ui: submitting a review with no decision marked is rejected', async () => {
+    child = spawnApp();
+    await settle(800);
+    const res = await fetch(`${WEB}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(),
+    });
+    assert.equal(res.status, 400);
+});
+
+test('review ui: discarding keeps verdicts picked but not yet submitted', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY, ENTRY_2] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const discard = await fetch(`${WEB}/discard`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams([['keep', '2'], [`verdict-${ENTRY_2.id}`, 'wrong']]),
+    });
+    assert.match(await discard.text(), new RegExp(`name="verdict-${ENTRY_2.id}" value="wrong" checked`));
+});
+
+test('review ui: decisions with a verdict do not count toward the kept newest ones', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY, ENTRY_2] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp();
+    await waitFor(mock, 'PUT', '/v1/entries');
+    const post = (path: string, params: string[][]) =>
+        fetch(`${WEB}${path}`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(params),
+        });
+
+    await post('/review', [[`verdict-${ENTRY_2.id}`, 'wrong']]);
+    assert.match(await (await fetch(`${WEB}/pending`)).text(), /name="keep" min="0" max="1"/);
+
+    const afterDiscard = await (await post('/discard', [['keep', '1']])).text();
+    assert.match(afterDiscard, new RegExp(ENTRY.title));
+    assert.match(afterDiscard, new RegExp(ENTRY_2.title));
 });

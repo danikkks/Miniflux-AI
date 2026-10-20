@@ -106,7 +106,7 @@ export const makeSqliteDatabase = (path: string): IDecisionStore & IReviewStore 
             db.prepare(`
                 update decisions set reviewed = 1
                 where reviewed = 0 and verdict is null and entry_id not in (
-                    select entry_id from decisions where reviewed = 0
+                    select entry_id from decisions where reviewed = 0 and verdict is null
                     order by decided_at desc, entry_id desc limit ?
                 )
             `).run(keep);
