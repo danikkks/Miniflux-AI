@@ -8,6 +8,7 @@ import { makeSqliteDatabase, makeSqliteGroupStore } from "./sqlite-database.js";
 import { makeAISummarizer } from "./ai-summarizer.js";
 import { makeB2FeedPublisher } from "./b2-feed-publisher.js";
 import { startWebUi } from "./web-ui.js";
+import type { IProcessing, ProcessingStatus } from "./core/entities.js";
 
 const requireEnv = (name: string): string => {
     const value = process.env[name];
@@ -15,13 +16,54 @@ const requireEnv = (name: string): string => {
     return value;
 };
 
-const loop = async (intervalMs: number, task: () => Promise<void>): Promise<never> => {
-    for (;;) {
+const trackRuns = (task: () => Promise<void>): IProcessing => {
+    let running: Promise<void> | null = null;
+    let lastFailed: boolean | null = null;
+    return {
+        run: () => (running ??= task()
+            .then(
+                () => { lastFailed = false; },
+                (err: unknown) => {
+                    console.error(err);
+                    lastFailed = true;
+                },
+            )
+            .finally(() => { running = null; })),
+        status: () => {
+            if (running) return "running";
+            if (lastFailed === null) return "idle";
+            return lastFailed ? "failed" : "completed";
+        },
+    };
+};
+
+const STATUS_PRECEDENCE: ProcessingStatus[] = ["running", "failed", "completed", "idle"];
+
+const trackInParallel = (runs: IProcessing[]): IProcessing => ({
+    run: async () => {
+        await Promise.all(runs.map((r) => r.run()));
+    },
+    status: () => {
+        const statuses = runs.map((r) => r.status());
+        return STATUS_PRECEDENCE.find((s) => statuses.includes(s)) ?? "idle";
+    },
+});
+
+const runInOrder = async (tasks: (() => Promise<void>)[]): Promise<void> => {
+    const errors: unknown[] = [];
+    for (const task of tasks) {
         try {
             await task();
         } catch (err) {
-            console.error(err);
+            errors.push(err);
         }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "processing failed");
+};
+
+const loop = async (intervalMs: number, task: () => Promise<void>): Promise<never> => {
+    for (;;) {
+        await task();
         await new Promise((resolve) => setTimeout(resolve, intervalMs));
     }
 };
@@ -41,10 +83,6 @@ void (async () => {
     const promptLoader = makePromptLoader(process.cwd());
     const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
     const database = makeSqliteDatabase(databasePath);
-    startWebUi(
-        makeReviewService(database, promptLoader),
-        parseInt(process.env.WEB_PORT || "3000"),
-    );
     const intervalMs =
         parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
     const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE ?? "") || Infinity;
@@ -98,17 +136,13 @@ void (async () => {
         batchSize,
     }));
 
-    if (process.env.RUN_SEQUENTIALLY === "true") {
-        await loop(intervalMs, async () => {
-            for (const step of steps) {
-                try {
-                    await step();
-                } catch (err) {
-                    console.error(err);
-                }
-            }
-        });
-    } else {
-        await Promise.all(steps.map((step) => loop(intervalMs, step)));
-    }
+    const loops = process.env.RUN_SEQUENTIALLY === "true"
+        ? [trackRuns(() => runInOrder(steps))]
+        : steps.map(trackRuns);
+    startWebUi(
+        makeReviewService(database, promptLoader),
+        trackInParallel(loops),
+        parseInt(process.env.WEB_PORT || "3000"),
+    );
+    await Promise.all(loops.map((l) => loop(intervalMs, () => l.run())));
 })();

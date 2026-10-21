@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { IReviewItem, IReviewPrompt, IReviewService } from "./core/entities.js";
+import type { IProcessing, IReviewItem, IReviewPrompt, IReviewService, ProcessingStatus } from "./core/entities.js";
 
 const ESCAPES: Record<string, string> = {
     "&": "&amp;",
@@ -73,7 +73,21 @@ const promptsStep = (prompts: IReviewPrompt[]): string => `
     ${prompts.length === 0 ? "<p>no custom prompt matches the reviewed categories</p>" : prompts.map(promptCard).join("")}
     <button hx-get="/pending" hx-target="#step" hx-disabled-elt="this">review more</button>`;
 
-const page = (step: string): string => `<!doctype html>
+const PROCESS_BUTTON = `<span id="process"><button hx-post="/process" hx-target="#process" hx-swap="outerHTML">process now</button></span>`;
+
+const PROCESSING_BUTTON = `<span id="process" hx-get="/process" hx-trigger="every 3s" hx-swap="outerHTML"><button disabled>processing...</button></span>`;
+
+const toast = (text: string): string =>
+    `<div id="toast" hx-swap-oob="true"><div class="toast" role="status">${esc(text)}</div></div>`;
+
+const PROCESS_CONTROLS: Record<ProcessingStatus, string> = {
+    idle: PROCESS_BUTTON,
+    running: PROCESSING_BUTTON,
+    completed: PROCESS_BUTTON + toast("processing completed"),
+    failed: PROCESS_BUTTON + toast("processing failed, see logs"),
+};
+
+const page = (step: string, processControl: string): string => `<!doctype html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -87,6 +101,9 @@ const page = (step: string): string => `<!doctype html>
         .badge.no { background: firebrick; }
         textarea { width: 100%; font-family: monospace; }
         #error { color: firebrick; }
+        header { display: flex; justify-content: space-between; align-items: center; }
+        .toast { position: fixed; bottom: 1rem; right: 1rem; padding: 0.75rem 1rem; border-radius: 0.3rem; background: #333; color: white; animation: fade-out 5s forwards; }
+        @keyframes fade-out { 80% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
     </style>
     <script>
         const showError = (text) => { document.getElementById("error").textContent = text; };
@@ -96,7 +113,11 @@ const page = (step: string): string => `<!doctype html>
     </script>
 </head>
 <body>
-    <h1>Decision review</h1>
+    <header>
+        <h1>Decision review</h1>
+        ${processControl}
+    </header>
+    <div id="toast"></div>
     <p id="error" role="alert"></p>
     <div id="step">${step}</div>
 </body>
@@ -113,11 +134,11 @@ const send = (res: ServerResponse, status: number, html: string): void => {
     res.end(html);
 };
 
-export const startWebUi = (service: IReviewService, port: number) => {
+export const startWebUi = (service: IReviewService, processing: IProcessing, port: number) => {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         try {
             if (req.method === "GET" && req.url === "/") {
-                send(res, 200, page(pendingStep(await service.listPending())));
+                send(res, 200, page(pendingStep(await service.listPending()), processing.status() === "running" ? PROCESSING_BUTTON : PROCESS_BUTTON));
                 return;
             }
             if (req.method === "GET" && req.url === "/pending") {
@@ -152,6 +173,15 @@ export const startWebUi = (service: IReviewService, port: number) => {
                 const body = await readBody(req);
                 await service.markReviewed(body.getAll("reviewed"));
                 send(res, 200, "marked as reviewed");
+                return;
+            }
+            if (req.method === "POST" && req.url === "/process") {
+                void processing.run();
+                send(res, 200, PROCESSING_BUTTON);
+                return;
+            }
+            if (req.method === "GET" && req.url === "/process") {
+                send(res, 200, PROCESS_CONTROLS[processing.status()]);
                 return;
             }
             send(res, 404, "not found");

@@ -734,3 +734,27 @@ test('review ui: decisions with a verdict do not count toward the kept newest on
     assert.match(afterDiscard, new RegExp(ENTRY.title));
     assert.match(afterDiscard, new RegExp(ENTRY_2.title));
 });
+
+test('review ui: processing started from the ui runs in the background and reports completion', async () => {
+    await mock.mockAnyResponse(json('GET', '/v1/categories', 200, [CATEGORY]));
+    await mock.mockAnyResponse(json('GET', `/v1/categories/${CATEGORY.id}/feeds`, 200, [FEED]));
+    await mock.mockAnyResponse(json('GET', `/v1/feeds/${FEED.id}/entries`, 200, { entries: [ENTRY, ENTRY_2] }));
+    await mock.mockAnyResponse({ httpRequest: { method: 'PUT', path: '/v1/entries' }, httpResponse: { statusCode: 204 } });
+    await mock.mockAnyResponse(json('POST', '/api/generate', 200, { response: 'no', done: true }));
+
+    child = spawnApp({ PROCESSING_BATCH_SIZE: '1' });
+    await waitFor(mock, 'PUT', '/v1/entries');
+    await eventually(async () => {
+        assert.match(await (await fetch(`${WEB}/process`)).text(), /process now/);
+    });
+
+    const started = await (await fetch(`${WEB}/process`, { method: 'POST' })).text();
+    assert.match(started, /processing\.\.\./);
+    await eventually(async () => {
+        const finished = await (await fetch(`${WEB}/process`)).text();
+        assert.match(finished, /processing completed/);
+        assert.match(finished, /process now/);
+    });
+    const updates: RecordedRequest[] = (await mock.retrieveRecordedRequests({ method: 'PUT', path: '/v1/entries' })) ?? [];
+    assert.deepEqual(updates.map((r) => entryUpdate(r).entry_ids), [[ENTRY.id], [ENTRY_2.id]]);
+});

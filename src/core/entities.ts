@@ -142,6 +142,13 @@ export interface IReviewService {
     discardPending(keep: number): Promise<void>;
 }
 
+export type ProcessingStatus = "idle" | "running" | "completed" | "failed";
+
+export interface IProcessing {
+    run(): Promise<void>;
+    status(): ProcessingStatus;
+}
+
 export const findPromptForCategory = (
     categoryTitle: string,
     prompts: ICustomPrompt[],

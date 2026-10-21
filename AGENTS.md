@@ -55,7 +55,7 @@ When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DEC
 
 ### Review UI
 
-`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user marks each one they checked as correct or wrong (unmarked rows stay unreviewed). Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. A "keep newest N" input above the list discards older decisions without a verdict (`POST /discard`, which also echoes back unsubmitted picks): they leave the queue with no verdict, so they never reach the prompt history; rows that already have a verdict are kept and do not count toward N. The user applies the result to the prompt file manually.
+`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user marks each one they checked as correct or wrong (unmarked rows stay unreviewed). Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. A "keep newest N" input above the list discards older decisions without a verdict (`POST /discard`, which also echoes back unsubmitted picks): they leave the queue with no verdict, so they never reach the prompt history; rows that already have a verdict are kept and do not count toward N. The user applies the result to the prompt file manually. A "process now" button (`POST /process`) runs every loop once outside the schedule (the single sequential loop with `RUN_SEQUENTIALLY=true`, otherwise each parallel loop); a loop already running, scheduled or manual, is joined rather than started twice. The run starts in the background, the button turns into a disabled "processing..." one that polls `GET /process` every 3s, and once no loop is running it turns back and a completion (or failure) toast shows. Scheduled runs count too: a page loaded during one starts in the "processing..." state. No toast shows before the first run of the process finishes.
 
 ### Interfaces (`core/entities.ts`)
 
@@ -71,6 +71,7 @@ When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DEC
 | `IGroupSummarizer` | `makeAISummarizer()` in `ai-summarizer.ts` |
 | `IFeedPublisher` | `makeB2FeedPublisher()` in `b2-feed-publisher.ts` |
 | `IPromptLoader` | `promptLoader` in `prompt-loader.ts` |
+| `IProcessing` | `trackRuns()` / `trackInParallel()` in `bootstrap.ts`, consumed by `web-ui.ts` |
 
 ### AI providers
 
