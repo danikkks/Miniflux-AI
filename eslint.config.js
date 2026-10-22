@@ -49,7 +49,7 @@ export default tseslint.config(
     rules: {
       "no-restricted-syntax": ["error", noClasses, {
         selector: "CallExpression[callee.name='setTimeout']",
-        message: "use eventually() to wait for a condition, or settle() to prove nothing happens",
+        message: "use eventually() to wait for a condition, or wait for the run to finish (GET /process) to prove nothing happens",
       }],
     },
   },

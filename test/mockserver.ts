@@ -32,18 +32,6 @@ export const startServer = async (port: number) => {
     throw new Error(`MockServer on port ${port} did not start within 60s`);
 };
 
-export const settle = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
-export const waitFor = async (client: MockClient, method: string, path: string, ms = 10000) => {
-    const deadline = Date.now() + ms;
-    while (Date.now() < deadline) {
-        const requests: RecordedRequest[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
-        if (requests.length > 0) return requests[0];
-        await new Promise(r => setTimeout(r, 100));
-    }
-    throw new Error(`timed out after ${ms}ms`);
-};
-
 export const eventually = async <T>(check: () => T | Promise<T>, ms = 10000): Promise<T> => {
     const deadline = Date.now() + ms;
     for (;;) {
@@ -64,13 +52,3 @@ export const json = (method: string, path: string, statusCode: number, body: obj
         body: JSON.stringify(body),
     },
 });
-
-export const waitForCount = async (client: MockClient, method: string, path: string, count: number, ms = 10000) => {
-    const deadline = Date.now() + ms;
-    while (Date.now() < deadline) {
-        const requests: RecordedRequest[] = (await client.retrieveRecordedRequests({ method, path })) ?? [];
-        if (requests.length >= count) return requests;
-        await new Promise(r => setTimeout(r, 100));
-    }
-    throw new Error(`timed out after ${ms}ms`);
-};

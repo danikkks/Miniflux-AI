@@ -34,7 +34,7 @@ src/
   bootstrap.ts      -- entry point: wires providers, runs the loop
 test/
   integration.test.ts  -- black-box integration tests
-  mockserver.ts        -- MockServer helpers (startServer, waitFor, json)
+  mockserver.ts        -- MockServer helpers (startServer, eventually, json)
   fixtures.ts          -- shared test data
 custom-prompt-*.md -- user-defined prompts (read from the working directory)
 ```
@@ -107,7 +107,7 @@ Files named `custom-prompt-<category>.md` placed in the working directory (the p
 ```
 test/
   fixtures.ts          -- shared constants (PROMPT, CATEGORY, FEED, ENTRY)
-  mockserver.ts        -- helpers: startServer, createClient, waitFor, json
+  mockserver.ts        -- helpers: startServer, createClient, eventually, json
   integration.test.ts  -- test cases
 ```
 
@@ -116,7 +116,7 @@ test/
 - Use `before` / `beforeEach` / `after` hooks for MockServer and child process lifecycle
 - Each test registers its own mock expectations independently
 - Pass `PROCESSING_INTERVAL_SECONDS=999` to the child so only one run loop iteration fires per test
-- Use `waitFor` to synchronise on recorded requests before asserting
+- Never sleep or poll the mocks; wait for `runFinished()` (polls `GET /process` until the run is over, and asserts it completed, or failed with `runFinished('failed')`), then assert on `recorded(method, path)` requests
 
 ### Environment variables
 
