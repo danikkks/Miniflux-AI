@@ -61,7 +61,7 @@ export const makeB2FeedPublisher = (config: B2Config): IFeedPublisher => {
         isPublishedAt: (feedUrl) => {
             if (!URL.canParse(feedUrl)) return false;
             const { hostname, pathname } = new URL(feedUrl);
-            const inBucket = pathname.includes(`/${config.bucket}/`) || hostname.startsWith(`${config.bucket}.`);
+            const inBucket = pathname.includes(`/${config.bucket}/`) || hostname.startsWith(`${config.bucket.toLowerCase()}.`);
             return inBucket && pathname.endsWith(`/${config.objectKey}`);
         },
 
