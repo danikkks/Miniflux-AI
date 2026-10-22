@@ -31,6 +31,7 @@ src/
   ai-summarizer.ts  -- IGroupSummarizer implementation (Ollama generate)
   b2-feed-publisher.ts -- IFeedPublisher implementation (builds the RSS xml, uploads it to Backblaze B2 via S3 api)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
+  logger.ts         -- ILogger implementation (stdout + one log file per run, one process prefix per logger)
   bootstrap.ts      -- entry point: wires providers, runs the loop
 test/
   integration.test.ts  -- black-box integration tests
@@ -71,6 +72,7 @@ When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DEC
 | `IGroupSummarizer` | `makeAISummarizer()` in `ai-summarizer.ts` |
 | `IFeedPublisher` | `makeB2FeedPublisher()` in `b2-feed-publisher.ts` |
 | `IPromptLoader` | `promptLoader` in `prompt-loader.ts` |
+| `ILogger` | `makeLogs()` in `logger.ts`, one per process (`filtering`, `grouping`, `web`, `app`) |
 | `IProcessing` | `trackRuns()` / `trackInParallel()` in `bootstrap.ts`, consumed by `web-ui.ts` |
 
 ### AI providers
@@ -140,4 +142,5 @@ test/
 | `GROUPED_FEED_KEY` | no | grouped.xml | Object name of the published feed |
 | `GROUPED_FEED_TITLE` | no | Grouped articles | Feed title |
 | `GROUPING_WINDOW_HOURS` | no | 48 | Hours a group stays open and in the feed |
-| `LOGGING_LEVEL` | no | - | `info` or `debug` |
+| `LOGGING_LEVEL` | no | info | `info` (progress, entry ids and titles) or `debug` (also full entry contents) |
+| `LOG_DIR` | no | logs | Log folder: one file per run (newest 10 kept per process), plus `app.log` and `web.log`; also mirrored to stdout |

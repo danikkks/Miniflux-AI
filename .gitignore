@@ -4,6 +4,7 @@ custom-prompt-**
 logs.txt
 *.jar
 *.db
+logs/
 data
 dist/
 reports/

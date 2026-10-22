@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { IProcessing, IReviewItem, IReviewPrompt, IReviewService, ProcessingStatus } from "./core/entities.js";
+import type { ILogger, IProcessing, IReviewItem, IReviewPrompt, IReviewService, ProcessingStatus } from "./core/entities.js";
 
 const ESCAPES: Record<string, string> = {
     "&": "&amp;",
@@ -134,7 +134,7 @@ const send = (res: ServerResponse, status: number, html: string): void => {
     res.end(html);
 };
 
-export const startWebUi = (service: IReviewService, processing: IProcessing, port: number) => {
+export const startWebUi = (service: IReviewService, processing: IProcessing, port: number, log: ILogger) => {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         try {
             if (req.method === "GET" && req.url === "/") {
@@ -176,6 +176,7 @@ export const startWebUi = (service: IReviewService, processing: IProcessing, por
                 return;
             }
             if (req.method === "POST" && req.url === "/process") {
+                log.info("processing requested");
                 void processing.run();
                 send(res, 200, PROCESSING_BUTTON);
                 return;
@@ -186,13 +187,15 @@ export const startWebUi = (service: IReviewService, processing: IProcessing, por
             }
             send(res, 404, "not found");
         } catch (err) {
-            console.error(err);
+            log.error("%s %s failed", req.method, req.url, err);
             send(res, 500, "internal error");
         }
     };
     const server = createServer((req, res) => {
         void handle(req, res);
     });
-    server.on("error", console.error);
+    server.on("error", (err) => {
+        log.error("server error", err);
+    });
     server.listen(port);
 };

@@ -142,6 +142,12 @@ export interface IReviewService {
     discardPending(keep: number): Promise<void>;
 }
 
+export interface ILogger {
+    info(message: string, ...details: unknown[]): void;
+    debug(message: string, ...details: unknown[]): void;
+    error(message: string, ...details: unknown[]): void;
+}
+
 export type ProcessingStatus = "idle" | "running" | "completed" | "failed";
 
 export interface IProcessing {

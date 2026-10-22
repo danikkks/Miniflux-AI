@@ -8,6 +8,7 @@ import { makeSqliteDatabase, makeSqliteGroupStore } from "./sqlite-database.js";
 import { makeAISummarizer } from "./ai-summarizer.js";
 import { makeB2FeedPublisher } from "./b2-feed-publisher.js";
 import { startWebUi } from "./web-ui.js";
+import { makeLogs, type Logs } from "./logger.js";
 import type { IProcessing, ProcessingStatus } from "./core/entities.js";
 
 const requireEnv = (name: string): string => {
@@ -16,15 +17,22 @@ const requireEnv = (name: string): string => {
     return value;
 };
 
-const trackRuns = (task: () => Promise<void>): IProcessing => {
+type Step = { name: string; run: () => Promise<void> };
+
+const trackRuns = (logs: Logs, name: string, task: () => Promise<void>): IProcessing => {
+    const log = logs.logger(name);
     let running: Promise<void> | null = null;
     let lastFailed: boolean | null = null;
+    const start = () => {
+        logs.startRun(name);
+        return task();
+    };
     return {
-        run: () => (running ??= task()
+        run: () => (running ??= start()
             .then(
                 () => { lastFailed = false; },
                 (err: unknown) => {
-                    console.error(err);
+                    log.error("run failed", err);
                     lastFailed = true;
                 },
             )
@@ -69,6 +77,10 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
 };
 
 void (async () => {
+    const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug");
+    const appLog = logs.logger("app");
+    const sequential = process.env.RUN_SEQUENTIALLY === "true";
+    const stepLog = (name: string) => logs.logger(name, sequential ? "processing" : name);
     const miniflux = makeMinifluxClient(
         requireEnv("MINIFLUX_URL"),
         requireEnv("MINIFLUX_AUTH_TOKEN"),
@@ -87,7 +99,7 @@ void (async () => {
         parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
     const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE ?? "") || Infinity;
 
-    const steps: (() => Promise<void>)[] = [];
+    const steps: Step[] = [];
 
     const groupingCategories = (process.env.GROUPING_CATEGORIES || "")
         .split(",")
@@ -98,7 +110,7 @@ void (async () => {
     const b2Configured = ["B2_ENDPOINT", "B2_REGION", "B2_BUCKET", "B2_KEY_ID", "B2_APPLICATION_KEY"].every((v) => process.env[v]);
     const groupingEnabled = decisionApi && Boolean(summaryModel) && b2Configured;
     if (groupingCategories.length > 0 && !groupingEnabled) {
-        console.warn("grouping is disabled: it requires OLLAMA_DECISION_API=true, OLLAMA_SUMMARY_MODEL and all B2_* variables");
+        appLog.info("grouping is disabled: it requires OLLAMA_DECISION_API=true, OLLAMA_SUMMARY_MODEL and all B2_* variables");
     }
     if (groupingCategories.length > 0 && groupingEnabled) {
         const groups = makeSqliteGroupStore(databasePath);
@@ -114,7 +126,7 @@ void (async () => {
             feedLink: requireEnv("MINIFLUX_URL"),
         });
         const windowHours = parseInt(process.env.GROUPING_WINDOW_HOURS || "48");
-        steps.push(makeStoryGrouper({
+        steps.push({ name: "grouping", run: makeStoryGrouper({
             feedReader: miniflux,
             classifier,
             entryUpdater: miniflux,
@@ -125,24 +137,32 @@ void (async () => {
             categoryTitles: groupingCategories,
             windowHours,
             batchSize,
-        }));
+            log: stepLog("grouping"),
+        }) });
     }
-    steps.push(makeEntryFilter({
+    steps.push({ name: "filtering", run: makeEntryFilter({
         feedReader: miniflux,
         promptLoader,
         classifier,
         entryUpdater: miniflux,
         decisionStore: database,
         batchSize,
-    }));
+        log: stepLog("filtering"),
+    }) });
 
-    const loops = process.env.RUN_SEQUENTIALLY === "true"
-        ? [trackRuns(() => runInOrder(steps))]
-        : steps.map(trackRuns);
+    const loops = sequential
+        ? [trackRuns(logs, "processing", () => runInOrder(steps.map((s) => s.run)))]
+        : steps.map((s) => trackRuns(logs, s.name, s.run));
+    const port = parseInt(process.env.WEB_PORT || "3000");
     startWebUi(
         makeReviewService(database, promptLoader),
         trackInParallel(loops),
-        parseInt(process.env.WEB_PORT || "3000"),
+        port,
+        logs.logger("web"),
+    );
+    appLog.info(
+        "started: %s, every %ds, review ui on port %d",
+        steps.map((s) => s.name).join(sequential ? " then " : " and "), intervalMs / 1000, port,
     );
     await Promise.all(loops.map((l) => loop(intervalMs, () => l.run())));
 })();

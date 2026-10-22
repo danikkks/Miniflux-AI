@@ -2,7 +2,7 @@ import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { writeFile, unlink } from 'node:fs/promises';
+import { writeFile, unlink, rm } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { PROMPT, CATEGORY, FEED, ENTRY, ENTRY_2, SUB_CATEGORY, SUB_FEED, ENTRY_3, GROUP_CATEGORY, GROUP_FEED, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_SUB_CATEGORY, GROUP_SUB_FEED, GROUP_ENTRY_C, GROUP_DIGEST } from './fixtures.js';
@@ -12,6 +12,7 @@ const ROOT = resolve(import.meta.dirname, '..');
 const PROMPT_FILE = resolve(ROOT, PROMPT.filename);
 
 const DB_FILE = resolve(ROOT, 'test-miniflux-ai.db');
+const LOG_DIR = resolve(ROOT, 'test-logs');
 
 const PORT = 18080;
 const WEB_PORT = 18081;
@@ -30,6 +31,7 @@ const baseEnv = () => ({
     PROCESSING_INTERVAL_SECONDS: '999',
     PROCESSING_BATCH_SIZE: '10',
     DATABASE_PATH: DB_FILE,
+    LOG_DIR,
     WEB_PORT: String(WEB_PORT),
     GROUPING_CATEGORIES: 'world news',
     B2_ENDPOINT: `http://localhost:${PORT}`,
@@ -73,6 +75,7 @@ after(async () => {
     child?.kill();
     await unlink(PROMPT_FILE).catch(() => {});
     await unlink(DB_FILE).catch(() => {});
+    await rm(LOG_DIR, { recursive: true, force: true });
     mockProcess?.kill();
 });
 

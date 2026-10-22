@@ -8,6 +8,7 @@ import type {
     IEntry,
     IEntryUpdater,
     IFeedReader,
+    ILogger,
     IPromptLoader,
     IStoredDecision,
 } from "./entities.js";
@@ -37,21 +38,6 @@ const changedDecisionIds = (decisions: IDecision[], previous: IStoredDecision[])
         .map((d) => d.entry.id);
 };
 
-const classifyOrSkip = async (
-    classifier: IAIClassifier,
-    entry: IEntry,
-    prompts: ICustomPrompt[],
-): Promise<IDecision | null> => {
-    const prompt = findPromptForCategory(entry.feed.category.title, prompts);
-    if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
-    try {
-        return { entry, decision: (await classifier.classify(entry, prompt.content)) ? "yes" : "no" };
-    } catch (err) {
-        console.error(err);
-        return null;
-    }
-};
-
 export type EntryFilterDeps = {
     feedReader: IFeedReader;
     promptLoader: IPromptLoader;
@@ -59,6 +45,7 @@ export type EntryFilterDeps = {
     entryUpdater: IEntryUpdater;
     decisionStore: IDecisionStore;
     batchSize: number;
+    log: ILogger;
 };
 
 export const makeEntryFilter = ({
@@ -68,47 +55,73 @@ export const makeEntryFilter = ({
     entryUpdater,
     decisionStore,
     batchSize,
+    log,
 }: EntryFilterDeps): (() => Promise<void>) => {
     const processedIds: string[] = [];
 
+    const classifyOrSkip = async (
+        entry: IEntry,
+        prompts: ICustomPrompt[],
+        progress: () => string,
+    ): Promise<IDecision | null> => {
+        const prompt = findPromptForCategory(entry.feed.category.title, prompts);
+        if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
+        log.debug("classifying entry %s", entry.id, entry);
+        try {
+            const decision = (await classifier.classify(entry, prompt.content)) ? "yes" : "no";
+            log.info("%s entry %s \"%s\" -> %s", progress(), entry.id, entry.title, decision === "yes" ? "relevant" : "irrelevant");
+            return { entry, decision };
+        } catch (err) {
+            log.error("%s entry %s \"%s\" failed, retrying next run", progress(), entry.id, entry.title, err);
+            return null;
+        }
+    };
+
     return async () => {
+        const startedAt = Date.now();
+        log.info("run started");
+
         const prompts = await promptLoader.load();
-        console.debug("customPrompts", prompts);
+        log.debug("custom prompts", prompts);
 
         const categories = await feedReader.getCategories();
-        console.debug("categories", categories);
+        log.debug("categories", categories);
 
         const relevantCategories = filterCategoriesWithPrompts(categories, prompts);
-        console.debug("categoriesWithPrompts", relevantCategories);
+        log.debug("categories with prompts", relevantCategories);
 
         const feeds = (
             await Promise.all(relevantCategories.map((c) => feedReader.getFeedsByCategory(c.id)))
         ).flat();
-        console.debug("feeds", feeds);
+        log.debug("feeds", feeds);
 
         const unreadEntries = (
             await Promise.all(feeds.map((f) => feedReader.getUnreadEntries(f.id)))
         ).flat();
-        console.debug("unreadEntries", unreadEntries);
 
         const toVerify = filterUnprocessedEntries(unreadEntries, processedIds, batchSize);
-        console.debug("unreadEntriesToVerify", toVerify);
+        log.info(
+            "%d prompts, %d categories, %d feeds, %d unread entries, %d to classify",
+            prompts.length, relevantCategories.length, feeds.length, unreadEntries.length, toVerify.length,
+        );
 
+        let done = 0;
+        const progress = () => `[${++done}/${toVerify.length}]`;
         const decisions = (
-            await Promise.all(toVerify.map((entry) => classifyOrSkip(classifier, entry, prompts)))
+            await Promise.all(toVerify.map((entry) => classifyOrSkip(entry, prompts, progress)))
         ).filter((d): d is IDecision => d !== null);
-        console.debug("aiDecisions", decisions);
 
         const toSkip = irrelevantEntryIds(decisions);
-        const skipped = unreadEntries.filter((e) => toSkip.includes(e.id));
-        console.debug("skipping", skipped.map((e) => e.title));
-
         const previous = await decisionStore.getDecisions(decisions.map((d) => d.entry.id));
         await decisionStore.saveDecisions(decisions);
         await decisionStore.resetVerdicts(changedDecisionIds(decisions, previous));
         if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
-        console.debug("skipped", skipped.map((e) => e.title));
 
         processedIds.push(...decisions.map((d) => d.entry.id));
+        log.info(
+            "run finished in %ss: %d relevant, %d irrelevant marked as read, %d failed",
+            ((Date.now() - startedAt) / 1000).toFixed(1),
+            decisions.length - toSkip.length, toSkip.length, toVerify.length - decisions.length,
+        );
     };
 };

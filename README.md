@@ -12,7 +12,8 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `PROCESSING_BATCH_SIZE`: Maximum unread entries processed each run (default: unlimited).
   - `DATABASE_PATH`: Optional SQLite file path for persisted data such as AI decisions on articles (default: `miniflux-ai.db`).
   - `WEB_PORT`: Optional port of the decision review UI (default: 3000).
-  - `LOGGING_LEVEL`: Optional verbosity level such as `info` or `debug`.
+  - `LOGGING_LEVEL`: Optional verbosity: `info` (default) logs each run's progress and every entry's id, title and outcome; `debug` also logs full entry contents, prompts, categories and feeds. Errors are always logged.
+  - `LOG_DIR`: Optional log folder (default: `logs`; `docker-run.sh` uses `data/logs`). Each run gets its own file, e.g. `grouping-2026-10-22T17-32-11.891Z.log` (one `processing-*.log` per run with `RUN_SEQUENTIALLY=true`), and only the newest 10 runs of each are kept. Logs outside runs go to `app.log` and `web.log`. Logs also go to stdout. Every line is prefixed with its process (`[filtering]`, `[grouping]`, `[web]`, `[app]`).
   - `OLLAMA_DECISION_API`: Set to `true` to classify entries with Ollama's decision api (`ollama.systemone`) instead of `generate`. Requires a model whose `ollama show` capabilities include `decision`.
   - `GROUPING_CATEGORIES`: Optional comma-separated Miniflux category titles (exact, case-insensitive). Subcategories named "Parent / Child" count as their parent. Their unread entries are grouped by story and published as one RSS feed to Backblaze B2. Subscribe Miniflux to the published feed and attach a filtering prompt to its category.
   - `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`: Backblaze B2 S3-compatible settings (e.g. `https://s3.us-west-004.backblazeb2.com`, `us-west-004`). Required with `GROUPING_CATEGORIES`; the bucket must be public. Grouping only runs with `OLLAMA_DECISION_API=true` and `OLLAMA_SUMMARY_MODEL`.
