@@ -23,8 +23,3 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `GROUPED_FEED_TITLE`: Optional feed title (default: `Grouped articles`).
   - `GROUPING_WINDOW_HOURS`: Optional time after its last article during which a group still accepts new ones, and stays in the feed (default: 48).
 - Run the script: `npm run start`
-
-## To-Do (prioritized)
-- [x] document environment variables
-- [ ] document how to create prompt files
-- [ ] support more AI providers: Ollama, Claude, etc.
