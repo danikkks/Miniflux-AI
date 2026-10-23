@@ -108,9 +108,11 @@ Files named `custom-prompt-<category>.md` placed in the working directory (the p
 
 ```
 test/
-  fixtures.ts          -- shared constants (PROMPT, CATEGORY, FEED, ENTRY)
-  mockserver.ts        -- helpers: startServer, createClient, eventually, json
-  integration.test.ts  -- test cases
+  fixtures.ts           -- shared constants (PROMPT, CATEGORY, FEED, ENTRY)
+  mockserver.ts         -- helpers: startServer, createClient, eventually, json
+  fake-servers.ts       -- miniflux, ollama and b2 fakes over the shared MockServer
+  application-runner.ts -- starts/stops dist/bootstrap.js and waits for runs
+  integration.test.ts   -- test cases
 ```
 
 ### Conventions
@@ -118,7 +120,8 @@ test/
 - Use `before` / `beforeEach` / `after` hooks for MockServer and child process lifecycle
 - Each test registers its own mock expectations independently
 - Pass `PROCESSING_INTERVAL_SECONDS=999` to the child so only one run loop iteration fires per test
-- Never sleep or poll the mocks; wait for `runFinished()` (polls `GET /process` until the run is over, and asserts it completed, or failed with `runFinished('failed')`), then assert on `recorded(method, path)` requests
+- Set up and assert through the fake servers in their own terms (`miniflux.hasUnread([ENTRY])`, `ollama.replies('no')`, `miniflux.markedAsRead()`, `b2.publishedItems()`), not raw MockServer calls; `miniflux.hasUnread` derives categories and feeds from the entries. Failure responses (`failsToMarkAsRead`, `failsToDecide`) use a higher MockServer priority, so they override regardless of order; other expectations match in the order they are registered
+- Drive the process through `app` (`runOnce(env)`, `start(env)`, `runFinished('failed')`, `stop()`, `processNow()`); never sleep or poll the mocks: `runFinished()` polls `GET /process` until the run is over and asserts it completed (or failed)
 
 ### Environment variables
 
