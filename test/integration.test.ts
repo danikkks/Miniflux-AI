@@ -2,9 +2,8 @@ import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
 import { writeFile, unlink, rm } from 'node:fs/promises';
-import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
-import { PROMPT, CATEGORY, ENTRY, ENTRY_2, ENTRY_3, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_ENTRY_C, GROUP_DIGEST, GROUP_FEED } from './fixtures.js';
+import { PROMPT, ENTRY, ENTRY_2, ENTRY_3, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_ENTRY_C, GROUP_DIGEST, GROUP_FEED } from './fixtures.js';
 import { startServer } from './mockserver.js';
 import { FAKE_PORT, FAKE_URL, PUBLISHED_FEED_PATH, b2, miniflux, ollama, recorded, resetFakes } from './fake-servers.js';
 import { makeApplicationRunner } from './application-runner.js';
@@ -92,42 +91,35 @@ test('entry classified as "no" is marked as read', async () => {
     assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
 });
 
-test('entry classified as "no" is stored in sqlite with its decision', async () => {
+const reviewRow = (decision: 'yes' | 'no', entry: typeof ENTRY) =>
+    new RegExp(`class="badge ${decision}">${decision}</span>\\s*<a href="${entry.url}"[^>]*>${entry.title}</a>\\s*<small>${entry.feed.category.title}</small>`);
+
+test('entry classified as "no" is listed for review with its decision', async () => {
     await miniflux.hasUnread([ENTRY]);
     await ollama.replies('no');
 
     await app.runOnce();
 
-    const db = new DatabaseSync(DB_FILE, { readOnly: true });
-    const rows = db.prepare('select entry_id, title, url, category, decision from decisions').all();
-    db.close();
-    assert.deepEqual(rows.map((r) => ({ ...r })), [
-        { entry_id: ENTRY.id, title: ENTRY.title, url: ENTRY.url, category: CATEGORY.title, decision: 'no' },
-    ]);
+    assert.match(await page('/pending'), reviewRow('no', ENTRY));
 });
 
-test('entry classified as "yes" is stored in sqlite with its decision', async () => {
+test('entry classified as "yes" is listed for review with its decision', async () => {
     await miniflux.hasUnread([ENTRY]);
     await ollama.replies('yes');
 
     await app.runOnce();
 
-    const db = new DatabaseSync(DB_FILE, { readOnly: true });
-    const rows = db.prepare('select entry_id, decision from decisions').all();
-    db.close();
-    assert.deepEqual(rows.map((r) => ({ ...r })), [{ entry_id: ENTRY.id, decision: 'yes' }]);
+    assert.match(await page('/pending'), reviewRow('yes', ENTRY));
 });
 
-test('answer with different case and surrounding whitespace is stored as a decision', async () => {
+test('answer with different case and surrounding whitespace counts as a decision', async () => {
     await miniflux.hasUnread([ENTRY]);
     await ollama.replies(' No\n');
 
     await app.runOnce();
 
-    const db = new DatabaseSync(DB_FILE, { readOnly: true });
-    const rows = db.prepare('select entry_id, decision from decisions').all();
-    db.close();
-    assert.deepEqual(rows.map((r) => ({ ...r })), [{ entry_id: ENTRY.id, decision: 'no' }]);
+    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
+    assert.match(await page('/pending'), reviewRow('no', ENTRY));
 });
 
 test('entry classified as "yes" is not marked as read', async () => {

@@ -51,6 +51,12 @@ export default tseslint.config(
         selector: "CallExpression[callee.name='setTimeout']",
         message: "use eventually() to wait for a condition, or wait for the run to finish (GET /process) to prove nothing happens",
       }],
+      "no-restricted-imports": ["error", {
+        patterns: [
+          { group: ["*sqlite*"], message: "the database is an internal detail. assert on observable behavior: miniflux, ollama and b2 requests or the review ui" },
+          { group: ["**/src/**", "**/dist/**"], message: "tests are black-box: drive dist/bootstrap.js through the application runner and fake servers" },
+        ],
+      }],
     },
   },
   {

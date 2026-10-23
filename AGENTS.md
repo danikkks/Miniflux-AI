@@ -92,6 +92,7 @@ Files named `custom-prompt-<category>.md` placed in the working directory (the p
 
 - Write integration tests only — never unit tests unless explicitly asked
 - Tests must be black-box: spawn the compiled `dist/bootstrap.js` as a child process, configure it via environment variables, and assert on observable HTTP behavior. No imports from `src/`
+- Assert only observable behavior: requests the app sends to Miniflux, Ollama and B2, and the review UI. Never read the database or other internals; eslint (`no-restricted-imports` on `test/**`) rejects sqlite and `src/`/`dist/` imports
 - Mock external HTTP APIs (Miniflux, Ollama) with a real mock HTTP server — not SDK mocks or in-process stubs
 - Each test sets up its own mock expectations independently, even at the cost of some duplication. Shared stubs reduce flexibility
 
