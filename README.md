@@ -9,7 +9,7 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `MINIFLUX_URL`: Base URL of your Miniflux server.
   - `MINIFLUX_AUTH_TOKEN`: Personal access token for Miniflux API calls.
   - `PROCESSING_INTERVAL_SECONDS`: How often filtering job should run (default: 300).
-  - `PROCESSING_BATCH_SIZE`: Maximum unread entries processed each run (default: unlimited).
+  - `PROCESSING_BATCH_SIZE`: Maximum unread entries filtered each run (default: unlimited). Grouping works through batches of this size until a fetch from Miniflux has nothing left to group.
   - `DATABASE_PATH`: Optional SQLite file path for persisted data such as AI decisions on articles (default: `miniflux-ai.db`).
   - `WEB_PORT`: Optional port of the decision review UI (default: 3000).
   - `LOGGING_LEVEL`: Optional verbosity: `info` (default) logs each run's progress and every entry's id, title and outcome; `debug` also logs full entry contents, prompts, categories and feeds. Errors are always logged.

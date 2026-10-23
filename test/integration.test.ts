@@ -585,6 +585,41 @@ test('grouping: unset batch size means no limit', async () => {
     assert.equal(items(put.body).length, 1);
 });
 
+test('grouping: one run groups all entries batch by batch', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mockDecision(0.9);
+
+    child = spawnApp({ ...DECISION_ENV, PROCESSING_BATCH_SIZE: '1' });
+    await runFinished();
+    const [put] = await recorded('PUT', FEED_PATH);
+    const [item] = items(put.body);
+    assert.match(item, new RegExp(GROUP_ENTRY_A.url));
+    assert.match(item, new RegExp(GROUP_ENTRY_B.url));
+    const generates = await recorded('POST', '/api/generate');
+    assert.equal(generates.length, 1);
+
+    const reads = await recorded('PUT', '/v1/entries');
+    assert.deepEqual(reads.flatMap((r) => entryUpdate(r).entry_ids), [GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
+    const fetches = await recorded('GET', `/v1/feeds/${GROUP_FEED.id}/entries`);
+    assert.equal(fetches.length, 2);
+});
+
+test('grouping: a failing entry is attempted once per run across batches', async () => {
+    await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await mock.mockAnyResponse({
+        httpRequest: { method: 'POST', path: '/v1/systemone', body: { type: 'REGEX', regex: `(?s).*${GROUP_ENTRY_A.title}.*` } },
+        httpResponse: { statusCode: 500, body: 'boom' },
+    });
+    await mockDecision(0.9);
+
+    child = spawnApp({ ...DECISION_ENV, PROCESSING_BATCH_SIZE: '1' });
+    await runFinished();
+    const decisions = await recorded('POST', '/v1/systemone');
+    assert.equal(decisions.filter((r) => JSON.stringify(r.body).includes(GROUP_ENTRY_A.title)).length, 1);
+    const reads = await recorded('PUT', '/v1/entries');
+    assert.deepEqual(reads.flatMap((r) => entryUpdate(r).entry_ids), [GROUP_ENTRY_B.id]);
+});
+
 test('grouping: entries are left unread when the b2 settings are incomplete', async () => {
     await mockGroupingSetup([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await mockDecision(0.9);
