@@ -1,0 +1,8 @@
+{
+  "all": true,
+  "src": ["src"],
+  "include": ["src/**"],
+  "exclude-after-remap": true,
+  "reporter": ["text", "html"],
+  "reports-dir": "coverage"
+}

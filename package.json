@@ -9,13 +9,15 @@
     "build": "npx tsc",
     "inspect": "npx tsc && node --inspect dist/bootstrap.js",
     "lint": "depcruise --output-type err-long src test && eslint src test",
-    "test": "npm run build && tsx --test test/integration.test.ts"
+    "test": "npm run build && tsx --test test/integration.test.ts",
+    "coverage": "npm run build && c8 tsx --test test/integration.test.ts"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.5.2",
+    "c8": "^12.0.0",
     "dependency-cruiser": "^17.4.3",
     "eslint": "^10.12.0",
     "mockserver-client": "^7.1.0",

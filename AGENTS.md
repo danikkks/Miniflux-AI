@@ -9,6 +9,7 @@ npm install        # install dependencies
 npm run build      # compile TypeScript (src/ -> dist/)
 npm run start      # build + run
 npm test           # build + run integration tests
+npm run coverage   # integration tests with coverage of src/ (text summary + coverage/index.html)
 ./docker-build.sh  # build Docker image
 ./docker-run.sh    # run Docker container (reads .env)
 ```

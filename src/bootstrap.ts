@@ -76,6 +76,8 @@ const loop = async (intervalMs: number, task: () => Promise<void>): Promise<neve
     }
 };
 
+process.on("SIGTERM", () => process.exit(0));
+
 void (async () => {
     const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug");
     const appLog = logs.logger("app");
