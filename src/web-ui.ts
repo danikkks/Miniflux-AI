@@ -196,6 +196,7 @@ export const startWebUi = (service: IReviewService, processing: IProcessing, por
     });
     server.on("error", (err) => {
         log.error("server error", err);
+        process.exit(1);
     });
     server.listen(port);
 };

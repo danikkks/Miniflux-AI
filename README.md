@@ -8,8 +8,7 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `OPENAI_API_KEY`: OpenAI key used for entries (articles) filtering.
   - `MINIFLUX_URL`: Base URL of your Miniflux server.
   - `MINIFLUX_AUTH_TOKEN`: Personal access token for Miniflux API calls.
-  - `PROCESSING_INTERVAL_SECONDS`: How often filtering job should run (default: 300).
-  - `PROCESSING_BATCH_SIZE`: Maximum unread entries filtered each run (default: unlimited). Grouping works through batches of this size until a fetch from Miniflux has nothing left to group.
+  - `PROCESSING_BATCH_SIZE`: Number of entries grouped or filtered per batch (default: unlimited). Each press of "process now" works through batches until a fetch from Miniflux has nothing left to group or filter. Without `RUN_SEQUENTIALLY=true`, articles the grouped feed gains during a press are filtered on the next press.
   - `DATABASE_PATH`: Optional SQLite file path for persisted data such as AI decisions on articles (default: `miniflux-ai.db`).
   - `WEB_PORT`: Optional port of the decision review UI (default: 3000).
   - `LOGGING_LEVEL`: Optional verbosity: `info` (default) logs each run's progress and every entry's id, title and outcome; `debug` also logs full entry contents, prompts, categories and feeds. Errors are always logged.
@@ -18,8 +17,8 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `GROUPING_CATEGORIES`: Optional comma-separated Miniflux category titles (exact, case-insensitive). Subcategories named "Parent / Child" count as their parent. Their unread entries are grouped by story and published as one RSS feed to Backblaze B2. Subscribe Miniflux to the published feed and attach a filtering prompt to its category.
   - `B2_ENDPOINT`, `B2_REGION`, `B2_BUCKET`, `B2_KEY_ID`, `B2_APPLICATION_KEY`: Backblaze B2 S3-compatible settings (e.g. `https://s3.us-west-004.backblazeb2.com`, `us-west-004`). Required with `GROUPING_CATEGORIES`; the bucket must be public. Grouping only runs with `OLLAMA_DECISION_API=true` and `OLLAMA_SUMMARY_MODEL`.
   - `OLLAMA_SUMMARY_MODEL`: Required with `GROUPING_CATEGORIES`. Ollama model that generates each group's title and description. It runs only after all grouping decisions of a run, so the decision model is idle by then.
-  - `RUN_SEQUENTIALLY`: Set to `true` to run, in one loop per interval, grouping, then group title and description generation, then filtering, so Ollama holds one model at a time. By default grouping and filtering run in parallel loops.
+  - `RUN_SEQUENTIALLY`: Set to `true` to run grouping, then group title and description generation, then filtering, one after another, so Ollama holds one model at a time. By default grouping and filtering run in parallel.
   - `GROUPED_FEED_KEY`: Optional object name of the feed (default: `grouped.xml`).
   - `GROUPED_FEED_TITLE`: Optional feed title (default: `Grouped articles`).
   - `GROUPING_WINDOW_HOURS`: Optional time after its last article during which a group still accepts new ones, and stays in the feed (default: 48).
-- Run the script: `npm run start`
+- Run the script: `npm run start`, then press "process now" in the review UI. Nothing is processed until then, and each press runs grouping and filtering once

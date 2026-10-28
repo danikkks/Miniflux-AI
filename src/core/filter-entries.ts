@@ -21,13 +21,6 @@ const filterCategoriesWithPrompts = (
         prompts.some((p) => c.title.toLowerCase().includes(p.category)),
     );
 
-const filterUnprocessedEntries = (
-    entries: IEntry[],
-    processedIds: string[],
-    batchSize: number,
-): IEntry[] =>
-    entries.filter((e) => !processedIds.includes(e.id)).slice(0, batchSize);
-
 const irrelevantEntryIds = (decisions: IDecision[]): string[] =>
     decisions.filter((d) => d.decision === "no").map((d) => d.entry.id);
 
@@ -95,33 +88,51 @@ export const makeEntryFilter = ({
         ).flat();
         log.debug("feeds", feeds);
 
-        const unreadEntries = (
-            await Promise.all(feeds.map((f) => feedReader.getUnreadEntries(f.id)))
-        ).flat();
-
-        const toVerify = filterUnprocessedEntries(unreadEntries, processedIds, batchSize);
         log.info(
-            "%d prompts, %d categories, %d feeds, %d unread entries, %d to classify",
-            prompts.length, relevantCategories.length, feeds.length, unreadEntries.length, toVerify.length,
+            "%d prompts, %d categories, %d feeds",
+            prompts.length, relevantCategories.length, feeds.length,
         );
 
-        let done = 0;
-        const progress = () => `[${++done}/${toVerify.length}]`;
-        const decisions = (
-            await Promise.all(toVerify.map((entry) => classifyOrSkip(entry, prompts, progress)))
-        ).filter((d): d is IDecision => d !== null);
+        const handled = new Set<string>();
+        const fetchUnprocessed = async (): Promise<IEntry[]> => {
+            // TODO: entries left unread (relevant ones, failures) fill the miniflux 100 per feed window and can hide newer entries
+            const unread = (
+                await Promise.all(feeds.map((f) => feedReader.getUnreadEntries(f.id)))
+            ).flat();
+            return unread.filter((e) => !processedIds.includes(e.id) && !handled.has(e.id));
+        };
 
-        const toSkip = irrelevantEntryIds(decisions);
-        const previous = await decisionStore.getDecisions(decisions.map((d) => d.entry.id));
-        await decisionStore.saveDecisions(decisions);
-        await decisionStore.resetVerdicts(changedDecisionIds(decisions, previous));
-        if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
+        let relevant = 0;
+        let irrelevant = 0;
+        let failed = 0;
+        let pending = await fetchUnprocessed();
+        for (let batch = 1; pending.length > 0; batch++) {
+            const toVerify = pending.slice(0, batchSize);
+            pending = pending.slice(toVerify.length);
+            toVerify.forEach((e) => handled.add(e.id));
+            log.info("batch %d: %d to classify, %d pending", batch, toVerify.length, pending.length);
 
-        processedIds.push(...decisions.map((d) => d.entry.id));
+            let done = 0;
+            const progress = () => `[${++done}/${toVerify.length}]`;
+            const decisions = (
+                await Promise.all(toVerify.map((entry) => classifyOrSkip(entry, prompts, progress)))
+            ).filter((d): d is IDecision => d !== null);
+
+            const toSkip = irrelevantEntryIds(decisions);
+            const previous = await decisionStore.getDecisions(decisions.map((d) => d.entry.id));
+            await decisionStore.saveDecisions(decisions);
+            await decisionStore.resetVerdicts(changedDecisionIds(decisions, previous));
+            if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
+
+            processedIds.push(...decisions.map((d) => d.entry.id));
+            relevant += decisions.length - toSkip.length;
+            irrelevant += toSkip.length;
+            failed += toVerify.length - decisions.length;
+            if (pending.length === 0) pending = await fetchUnprocessed();
+        }
         log.info(
             "run finished in %ss: %d relevant, %d irrelevant marked as read, %d failed",
-            ((Date.now() - startedAt) / 1000).toFixed(1),
-            decisions.length - toSkip.length, toSkip.length, toVerify.length - decisions.length,
+            ((Date.now() - startedAt) / 1000).toFixed(1), relevant, irrelevant, failed,
         );
     };
 };

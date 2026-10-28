@@ -1,9 +1,11 @@
 import { test, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
+import { createServer } from 'node:http';
 import { writeFile, unlink, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { PROMPT, ENTRY, ENTRY_2, ENTRY_3, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_ENTRY_C, GROUP_DIGEST, GROUP_FEED } from './fixtures.js';
+import { PROMPT, FEED, ENTRY, ENTRY_2, ENTRY_3, GROUP_ENTRY_A, GROUP_ENTRY_B, GROUP_ENTRY_C, GROUP_DIGEST, GROUP_FEED } from './fixtures.js';
 import { startServer } from './mockserver.js';
 import { FAKE_PORT, FAKE_URL, PUBLISHED_FEED_PATH, b2, miniflux, ollama, recorded, resetFakes } from './fake-servers.js';
 import { makeApplicationRunner } from './application-runner.js';
@@ -23,7 +25,6 @@ const app = makeApplicationRunner(ROOT, WEB, {
     OLLAMA_BASE_URL: FAKE_URL,
     OLLAMA_MODEL: 'test-model',
     AI_PROVIDER: 'OLLAMA',
-    PROCESSING_INTERVAL_SECONDS: '999',
     PROCESSING_BATCH_SIZE: '10',
     DATABASE_PATH: DB_FILE,
     LOG_DIR,
@@ -82,6 +83,27 @@ after(async () => {
     fakeServer?.kill();
 });
 
+test('nothing is processed until triggered from the ui', async () => {
+    await miniflux.hasUnread([ENTRY]);
+    await ollama.replies('no');
+
+    await app.start();
+
+    assert.doesNotMatch(await page('/process'), /processing/);
+});
+
+test('app exits with an error when the review ui port is taken', async () => {
+    const blocker = createServer().listen(WEB_PORT);
+    await once(blocker, 'listening');
+    try {
+        app.launch();
+
+        assert.equal(await app.exitCode(), 1);
+    } finally {
+        blocker.close();
+    }
+});
+
 test('entry classified as "no" is marked as read', async () => {
     await miniflux.hasUnread([ENTRY]);
     await ollama.replies('no');
@@ -129,6 +151,37 @@ test('entry classified as "yes" is not marked as read', async () => {
     await app.runOnce();
 
     assert.deepEqual(await miniflux.markedAsRead(), []);
+});
+
+test('filtering: one run classifies all entries batch by batch', async () => {
+    await miniflux.hasUnread([ENTRY, ENTRY_2]);
+    await ollama.replies('no');
+
+    await app.runOnce({ PROCESSING_BATCH_SIZE: '1' });
+
+    assert.deepEqual(await miniflux.markAsReadCalls(), [[ENTRY.id], [ENTRY_2.id]]);
+    assert.equal(await miniflux.unreadRequested(FEED), 2);
+});
+
+test('filtering: a batch size below 1 means no limit', async () => {
+    await miniflux.hasUnread([ENTRY, ENTRY_2]);
+    await ollama.replies('no');
+
+    await app.runOnce({ PROCESSING_BATCH_SIZE: '-1' });
+
+    assert.deepEqual(await miniflux.markAsReadCalls(), [[ENTRY.id, ENTRY_2.id]]);
+});
+
+test('filtering: a failing entry is attempted once per run across batches', async () => {
+    await miniflux.hasUnread([ENTRY, ENTRY_2]);
+    await ollama.failsToReply(ENTRY.title);
+    await ollama.replies('no');
+
+    await app.runOnce({ PROCESSING_BATCH_SIZE: '1' });
+
+    const attempts = (await ollama.generateRequests()).filter((r) => JSON.stringify(r.body).includes(ENTRY.title));
+    assert.equal(attempts.length, 1);
+    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY_2.id]);
 });
 
 test('decision api: entry classified as "no" is marked as read', async () => {
@@ -498,8 +551,7 @@ test('review ui: a changed decision brings the entry back for review without its
 });
 
 test('review ui: discarding with an invalid keep value is rejected', async () => {
-    app.start();
-    await app.runFinished('failed');
+    await app.start();
 
     const res = await postForm('/discard', [['keep', 'abc']]);
 
@@ -507,8 +559,7 @@ test('review ui: discarding with an invalid keep value is rejected', async () =>
 });
 
 test('review ui: submitting a review with no decision marked is rejected', async () => {
-    app.start();
-    await app.runFinished('failed');
+    await app.start();
 
     const res = await postForm('/review', []);
 
@@ -539,13 +590,13 @@ test('review ui: decisions with a verdict do not count toward the kept newest on
 });
 
 test('review ui: processing started from the ui runs in the background and reports completion', async () => {
-    await miniflux.hasUnread([ENTRY, ENTRY_2]);
+    await miniflux.hasUnread([ENTRY]);
     await ollama.replies('no');
-    await app.runOnce({ PROCESSING_BATCH_SIZE: '1' });
+    await app.start();
 
     assert.match(await app.processNow(), /processing\.\.\./);
     await app.runFinished();
 
     assert.match(await page('/process'), /process now/);
-    assert.deepEqual(await miniflux.markAsReadCalls(), [[ENTRY.id], [ENTRY_2.id]]);
+    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
 });

@@ -70,6 +70,12 @@ const decision = (answer: Answer) => ({
 export const ollama = {
     replies: (response: string) => mock.mockAnyResponse(json('POST', '/api/generate', 200, { response, done: true })),
 
+    failsToReply: (about: string) => mock.mockAnyResponse({
+        httpRequest: { method: 'POST', path: '/api/generate', body: bodyMatching(about) },
+        httpResponse: { statusCode: 500, body: 'boom' },
+        priority: OVERRIDE,
+    }),
+
     summarizes: () => ollama.replies(JSON.stringify({ title: 'Generated title', description: 'Generated description' })),
 
     supportsDecisions: () => mock.mockAnyResponse(json('POST', '/api/show', 200, { capabilities: ['decision'] })),

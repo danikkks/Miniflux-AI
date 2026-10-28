@@ -69,102 +69,91 @@ const runInOrder = async (tasks: (() => Promise<void>)[]): Promise<void> => {
     if (errors.length > 0) throw new AggregateError(errors, "processing failed");
 };
 
-const loop = async (intervalMs: number, task: () => Promise<void>): Promise<never> => {
-    for (;;) {
-        await task();
-        await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-};
-
 process.on("SIGTERM", () => process.exit(0));
 
-void (async () => {
-    const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug");
-    const appLog = logs.logger("app");
-    const sequential = process.env.RUN_SEQUENTIALLY === "true";
-    const stepLog = (name: string) => logs.logger(name, sequential ? "processing" : name);
-    const miniflux = makeMinifluxClient(
-        requireEnv("MINIFLUX_URL"),
-        requireEnv("MINIFLUX_AUTH_TOKEN"),
-    );
-    const classifier = makeAIClassifier({
-        useOpenAI: process.env.AI_PROVIDER === "OPENAI",
-        openaiApiKey: process.env.OPENAI_API_KEY || "",
-        ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
-        ollamaModel: process.env.OLLAMA_MODEL,
-        useDecisionApi: process.env.OLLAMA_DECISION_API === "true",
+const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug");
+const appLog = logs.logger("app");
+const sequential = process.env.RUN_SEQUENTIALLY === "true";
+const stepLog = (name: string) => logs.logger(name, sequential ? "processing" : name);
+const miniflux = makeMinifluxClient(
+    requireEnv("MINIFLUX_URL"),
+    requireEnv("MINIFLUX_AUTH_TOKEN"),
+);
+const classifier = makeAIClassifier({
+    useOpenAI: process.env.AI_PROVIDER === "OPENAI",
+    openaiApiKey: process.env.OPENAI_API_KEY || "",
+    ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
+    ollamaModel: process.env.OLLAMA_MODEL,
+    useDecisionApi: process.env.OLLAMA_DECISION_API === "true",
+});
+const promptLoader = makePromptLoader(process.cwd());
+const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
+const database = makeSqliteDatabase(databasePath);
+const requestedBatchSize = parseInt(process.env.PROCESSING_BATCH_SIZE ?? "");
+const batchSize = requestedBatchSize > 0 ? requestedBatchSize : Infinity;
+
+const steps: Step[] = [];
+
+const groupingCategories = (process.env.GROUPING_CATEGORIES || "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+const decisionApi = process.env.AI_PROVIDER !== "OPENAI" && process.env.OLLAMA_DECISION_API === "true";
+const summaryModel = process.env.OLLAMA_SUMMARY_MODEL;
+const b2Configured = ["B2_ENDPOINT", "B2_REGION", "B2_BUCKET", "B2_KEY_ID", "B2_APPLICATION_KEY"].every((v) => process.env[v]);
+const groupingEnabled = decisionApi && Boolean(summaryModel) && b2Configured;
+if (groupingCategories.length > 0 && !groupingEnabled) {
+    appLog.info("grouping is disabled: it requires OLLAMA_DECISION_API=true, OLLAMA_SUMMARY_MODEL and all B2_* variables");
+}
+if (groupingCategories.length > 0 && groupingEnabled) {
+    const groups = makeSqliteGroupStore(databasePath);
+    const summarizer = makeAISummarizer(requireEnv("OLLAMA_BASE_URL"), requireEnv("OLLAMA_SUMMARY_MODEL"));
+    const publisher = makeB2FeedPublisher({
+        endpoint: requireEnv("B2_ENDPOINT"),
+        region: requireEnv("B2_REGION"),
+        bucket: requireEnv("B2_BUCKET"),
+        keyId: requireEnv("B2_KEY_ID"),
+        applicationKey: requireEnv("B2_APPLICATION_KEY"),
+        objectKey: process.env.GROUPED_FEED_KEY || "grouped.xml",
+        feedTitle: process.env.GROUPED_FEED_TITLE || "Grouped articles",
+        feedLink: requireEnv("MINIFLUX_URL"),
     });
-    const promptLoader = makePromptLoader(process.cwd());
-    const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
-    const database = makeSqliteDatabase(databasePath);
-    const intervalMs =
-        parseInt(process.env.PROCESSING_INTERVAL_SECONDS || "300") * 1000;
-    const batchSize = parseInt(process.env.PROCESSING_BATCH_SIZE ?? "") || Infinity;
-
-    const steps: Step[] = [];
-
-    const groupingCategories = (process.env.GROUPING_CATEGORIES || "")
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-    const decisionApi = process.env.AI_PROVIDER !== "OPENAI" && process.env.OLLAMA_DECISION_API === "true";
-    const summaryModel = process.env.OLLAMA_SUMMARY_MODEL;
-    const b2Configured = ["B2_ENDPOINT", "B2_REGION", "B2_BUCKET", "B2_KEY_ID", "B2_APPLICATION_KEY"].every((v) => process.env[v]);
-    const groupingEnabled = decisionApi && Boolean(summaryModel) && b2Configured;
-    if (groupingCategories.length > 0 && !groupingEnabled) {
-        appLog.info("grouping is disabled: it requires OLLAMA_DECISION_API=true, OLLAMA_SUMMARY_MODEL and all B2_* variables");
-    }
-    if (groupingCategories.length > 0 && groupingEnabled) {
-        const groups = makeSqliteGroupStore(databasePath);
-        const summarizer = makeAISummarizer(requireEnv("OLLAMA_BASE_URL"), requireEnv("OLLAMA_SUMMARY_MODEL"));
-        const publisher = makeB2FeedPublisher({
-            endpoint: requireEnv("B2_ENDPOINT"),
-            region: requireEnv("B2_REGION"),
-            bucket: requireEnv("B2_BUCKET"),
-            keyId: requireEnv("B2_KEY_ID"),
-            applicationKey: requireEnv("B2_APPLICATION_KEY"),
-            objectKey: process.env.GROUPED_FEED_KEY || "grouped.xml",
-            feedTitle: process.env.GROUPED_FEED_TITLE || "Grouped articles",
-            feedLink: requireEnv("MINIFLUX_URL"),
-        });
-        const windowHours = parseInt(process.env.GROUPING_WINDOW_HOURS || "48");
-        steps.push({ name: "grouping", run: makeStoryGrouper({
-            feedReader: miniflux,
-            classifier,
-            entryUpdater: miniflux,
-            groups,
-            summarizer,
-            publisher,
-            feedRefresher: miniflux,
-            categoryTitles: groupingCategories,
-            windowHours,
-            batchSize,
-            log: stepLog("grouping"),
-        }) });
-    }
-    steps.push({ name: "filtering", run: makeEntryFilter({
+    const windowHours = parseInt(process.env.GROUPING_WINDOW_HOURS || "48");
+    steps.push({ name: "grouping", run: makeStoryGrouper({
         feedReader: miniflux,
-        promptLoader,
         classifier,
         entryUpdater: miniflux,
-        decisionStore: database,
+        groups,
+        summarizer,
+        publisher,
+        feedRefresher: miniflux,
+        categoryTitles: groupingCategories,
+        windowHours,
         batchSize,
-        log: stepLog("filtering"),
+        log: stepLog("grouping"),
     }) });
+}
+steps.push({ name: "filtering", run: makeEntryFilter({
+    feedReader: miniflux,
+    promptLoader,
+    classifier,
+    entryUpdater: miniflux,
+    decisionStore: database,
+    batchSize,
+    log: stepLog("filtering"),
+}) });
 
-    const loops = sequential
-        ? [trackRuns(logs, "processing", () => runInOrder(steps.map((s) => s.run)))]
-        : steps.map((s) => trackRuns(logs, s.name, s.run));
-    const port = parseInt(process.env.WEB_PORT || "3000");
-    startWebUi(
-        makeReviewService(database, promptLoader),
-        trackInParallel(loops),
-        port,
-        logs.logger("web"),
-    );
-    appLog.info(
-        "started: %s, every %ds, review ui on port %d",
-        steps.map((s) => s.name).join(sequential ? " then " : " and "), intervalMs / 1000, port,
-    );
-    await Promise.all(loops.map((l) => loop(intervalMs, () => l.run())));
-})();
+const runs = sequential
+    ? [trackRuns(logs, "processing", () => runInOrder(steps.map((s) => s.run)))]
+    : steps.map((s) => trackRuns(logs, s.name, s.run));
+const port = parseInt(process.env.WEB_PORT || "3000");
+startWebUi(
+    makeReviewService(database, promptLoader),
+    trackInParallel(runs),
+    port,
+    logs.logger("web"),
+);
+appLog.info(
+    "started: %s run when triggered from the review ui on port %d",
+    steps.map((s) => s.name).join(sequential ? " then " : " and "), port,
+);

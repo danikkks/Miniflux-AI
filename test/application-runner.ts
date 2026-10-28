@@ -7,14 +7,26 @@ type Env = Record<string, string>;
 
 export const makeApplicationRunner = (root: string, webUrl: string, baseEnv: Env) => {
     let child: ChildProcess | undefined;
+    let exited: Promise<unknown[]> = Promise.resolve([]);
 
-    const start = (env: Env = {}) => {
+    const launch = (env: Env = {}) => {
         child = spawn('node', ['dist/bootstrap.js'], {
             cwd: root,
             env: { ...process.env, ...baseEnv, ...env },
             stdio: 'pipe',
         });
+        exited = once(child, 'exit');
     };
+
+    const start = async (env: Env = {}) => {
+        launch(env);
+        await eventually(async () => {
+            assert.equal(child?.exitCode, null, 'the app exited during startup');
+            assert.ok((await fetch(`${webUrl}/process`)).ok);
+        });
+    };
+
+    const processNow = async () => (await fetch(`${webUrl}/process`, { method: 'POST' })).text();
 
     const runFinished = (outcome: 'completed' | 'failed' = 'completed') =>
         eventually(async () => {
@@ -23,19 +35,21 @@ export const makeApplicationRunner = (root: string, webUrl: string, baseEnv: Env
 
     const stop = async () => {
         if (!child || child.exitCode !== null || child.signalCode !== null) return;
-        const exited = once(child, 'exit');
         child.kill();
         await exited;
     };
 
     return {
+        launch,
         start,
         runFinished,
         stop,
+        processNow,
         runOnce: async (env: Env = {}) => {
-            start(env);
+            await start(env);
+            await processNow();
             await runFinished();
         },
-        processNow: async () => (await fetch(`${webUrl}/process`, { method: 'POST' })).text(),
+        exitCode: async () => (await exited)[0],
     };
 };
