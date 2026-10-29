@@ -16,7 +16,8 @@ const sameStoryPrompt = (group: IGroup): string =>
     `Is the article below about the same news story or event as "${group.summary?.title ?? group.entries[0].title}"? Answer yes or no.`;
 
 const DIGEST_PROMPT =
-    "Is the article below a digest that covers several separate news stories? Answer yes or no.";
+    "Is the article below a digest that covers several separate news stories, each with its own body text? " +
+    "\"Read also\" and related-links sections are not stories. Answer yes or no.";
 
 export type StoryGrouperDeps = {
     feedReader: IFeedReader;

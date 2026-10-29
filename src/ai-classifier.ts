@@ -1,6 +1,7 @@
 import { OpenAI } from "openai";
 import { Ollama } from "ollama/dist/index.cjs";
 import { stripHtml } from "string-strip-html";
+import TurndownService from "turndown";
 import type { IAIClassifier, IEntry } from "./core/entities.js";
 
 const DECISION_CAPABILITY = "decision";
@@ -9,6 +10,11 @@ const SYSTEMONE_TOKEN_LIMIT = 8194;
 const SYSTEMONE_TOKEN_TARGET = SYSTEMONE_TOKEN_LIMIT * 0.9;
 const SYSTEMONE_MAX_ATTEMPTS = 3;
 const SYSTEMONE_BODY_LIMIT_BYTES = 64 * 1024 * 0.9;
+
+const structurePreservingHtmlToText = new TurndownService({ headingStyle: "atx" }).addRule("linkText", {
+    filter: "a",
+    replacement: (content) => content,
+});
 
 const systemoneRequest = (model: string, state: string, prompt: string) => ({
     model,
@@ -44,7 +50,7 @@ const parseYesNo = (answer: string): boolean => {
 
 const classifyWithDecisionApi = async (client: Ollama, model: string, entry: IEntry, prompt: string): Promise<boolean> => {
     const title = stripHtml(entry.title).result;
-    const body = entry.content.length > 1000 ? stripHtml(entry.content).result : "";
+    const body = entry.content.length > 1000 ? structurePreservingHtmlToText.turndown(entry.content) : "";
     let state = fitToBodyLimit(model, `${title}\n${body}`, prompt);
 
     for (let attempt = 1; attempt <= SYSTEMONE_MAX_ATTEMPTS; attempt++) {
@@ -104,7 +110,7 @@ export const makeAIClassifier = (config: IAIClassifierConfig): IAIClassifier => 
 
             const r = await client.generate({
                 model,
-                prompt: `${prompt}\n\n ${stripHtml(entry.title).result}\n${entry.content.length > 1000 ? stripHtml(entry.content).result : ""}`,
+                prompt: `${prompt}\n\n ${stripHtml(entry.title).result}\n${entry.content.length > 1000 ? structurePreservingHtmlToText.turndown(entry.content) : ""}`,
                 think: true,
             });
             if (r.response === undefined) throw new Error("model returned no response");
