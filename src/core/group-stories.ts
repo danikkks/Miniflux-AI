@@ -29,7 +29,6 @@ export type StoryGrouperDeps = {
     feedRefresher: IFeedRefresher;
     categoryTitles: string[];
     windowHours: number;
-    batchSize: number;
     log: ILogger;
 };
 
@@ -43,7 +42,6 @@ export const makeStoryGrouper = ({
     feedRefresher,
     categoryTitles,
     windowHours,
-    batchSize,
     log,
 }: StoryGrouperDeps): (() => Promise<void>) => {
     const digestIds: string[] = [];
@@ -84,14 +82,11 @@ export const makeStoryGrouper = ({
         };
         let grouped = 0;
         let failed = 0;
-        let pending = await fetchUnhandled();
-        for (let batch = 1; pending.length > 0; batch++) {
-            const toGroup = pending.slice(0, batchSize);
-            pending = pending.slice(toGroup.length);
-            log.info("batch %d: %d to group, %d pending", batch, toGroup.length, pending.length);
-            for (const [i, entry] of toGroup.entries()) {
+        for (let pending = await fetchUnhandled(); pending.length > 0; pending = await fetchUnhandled()) {
+            log.info("%d to group", pending.length);
+            for (const [i, entry] of pending.entries()) {
                 handled.add(entry.id);
-                const progress = `[${i + 1}/${toGroup.length}] entry ${entry.id} "${entry.title}"`;
+                const progress = `[${i + 1}/${pending.length}] entry ${entry.id} "${entry.title}"`;
                 log.debug("grouping entry %s", entry.id, entry);
                 try {
                     if (await classifier.classify(entry, DIGEST_PROMPT)) {
@@ -118,7 +113,6 @@ export const makeStoryGrouper = ({
                     log.error("%s failed, retrying next run", progress, err);
                 }
             }
-            if (pending.length === 0) pending = await fetchUnhandled();
         }
 
         const changed = (await groups.listGroupsSince(windowHours))

@@ -10,7 +10,6 @@ import type {
     IFeedReader,
     ILogger,
     IPromptLoader,
-    IStoredDecision,
 } from "./entities.js";
 
 const filterCategoriesWithPrompts = (
@@ -21,23 +20,12 @@ const filterCategoriesWithPrompts = (
         prompts.some((p) => c.title.toLowerCase().includes(p.category)),
     );
 
-const irrelevantEntryIds = (decisions: IDecision[]): string[] =>
-    decisions.filter((d) => d.decision === "no").map((d) => d.entry.id);
-
-const changedDecisionIds = (decisions: IDecision[], previous: IStoredDecision[]): string[] => {
-    const before = new Map(previous.map((p) => [p.entryId, p.decision]));
-    return decisions
-        .filter((d) => before.has(d.entry.id) && before.get(d.entry.id) !== d.decision)
-        .map((d) => d.entry.id);
-};
-
 export type EntryFilterDeps = {
     feedReader: IFeedReader;
     promptLoader: IPromptLoader;
     classifier: IAIClassifier;
     entryUpdater: IEntryUpdater;
     decisionStore: IDecisionStore;
-    batchSize: number;
     log: ILogger;
 };
 
@@ -47,7 +35,6 @@ export const makeEntryFilter = ({
     classifier,
     entryUpdater,
     decisionStore,
-    batchSize,
     log,
 }: EntryFilterDeps): (() => Promise<void>) => {
     const processedIds: string[] = [];
@@ -55,17 +42,17 @@ export const makeEntryFilter = ({
     const classifyOrSkip = async (
         entry: IEntry,
         prompts: ICustomPrompt[],
-        progress: () => string,
+        progress: string,
     ): Promise<IDecision | null> => {
         const prompt = findPromptForCategory(entry.feed.category.title, prompts);
         if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
         log.debug("classifying entry %s", entry.id, entry);
         try {
             const decision = (await classifier.classify(entry, prompt.content)) ? "yes" : "no";
-            log.info("%s entry %s \"%s\" -> %s", progress(), entry.id, entry.title, decision === "yes" ? "relevant" : "irrelevant");
+            log.info("%s entry %s \"%s\" -> %s", progress, entry.id, entry.title, decision === "yes" ? "relevant" : "irrelevant");
             return { entry, decision };
         } catch (err) {
-            log.error("%s entry %s \"%s\" failed, retrying next run", progress(), entry.id, entry.title, err);
+            log.error("%s entry %s \"%s\" failed, retrying next run", progress, entry.id, entry.title, err);
             return null;
         }
     };
@@ -105,30 +92,26 @@ export const makeEntryFilter = ({
         let relevant = 0;
         let irrelevant = 0;
         let failed = 0;
-        let pending = await fetchUnprocessed();
-        for (let batch = 1; pending.length > 0; batch++) {
-            const toVerify = pending.slice(0, batchSize);
-            pending = pending.slice(toVerify.length);
-            toVerify.forEach((e) => handled.add(e.id));
-            log.info("batch %d: %d to classify, %d pending", batch, toVerify.length, pending.length);
-
-            let done = 0;
-            const progress = () => `[${++done}/${toVerify.length}]`;
-            const decisions = (
-                await Promise.all(toVerify.map((entry) => classifyOrSkip(entry, prompts, progress)))
-            ).filter((d): d is IDecision => d !== null);
-
-            const toSkip = irrelevantEntryIds(decisions);
-            const previous = await decisionStore.getDecisions(decisions.map((d) => d.entry.id));
-            await decisionStore.saveDecisions(decisions);
-            await decisionStore.resetVerdicts(changedDecisionIds(decisions, previous));
-            if (toSkip.length > 0) await entryUpdater.markAsRead(toSkip);
-
-            processedIds.push(...decisions.map((d) => d.entry.id));
-            relevant += decisions.length - toSkip.length;
-            irrelevant += toSkip.length;
-            failed += toVerify.length - decisions.length;
-            if (pending.length === 0) pending = await fetchUnprocessed();
+        for (let pending = await fetchUnprocessed(); pending.length > 0; pending = await fetchUnprocessed()) {
+            log.info("%d to classify", pending.length);
+            for (const [i, entry] of pending.entries()) {
+                handled.add(entry.id);
+                const decision = await classifyOrSkip(entry, prompts, `[${i + 1}/${pending.length}]`);
+                if (!decision) {
+                    failed++;
+                    continue;
+                }
+                const previous = (await decisionStore.getDecisions([entry.id])).at(0);
+                await decisionStore.saveDecisions([decision]);
+                if (previous && previous.decision !== decision.decision) await decisionStore.resetVerdicts([entry.id]);
+                if (decision.decision === "no") {
+                    await entryUpdater.markAsRead([entry.id]);
+                    irrelevant++;
+                } else {
+                    relevant++;
+                }
+                processedIds.push(entry.id);
+            }
         }
         log.info(
             "run finished in %ss: %d relevant, %d irrelevant marked as read, %d failed",

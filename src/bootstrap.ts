@@ -89,8 +89,6 @@ const classifier = makeAIClassifier({
 const promptLoader = makePromptLoader(process.cwd());
 const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
 const database = makeSqliteDatabase(databasePath);
-const requestedBatchSize = parseInt(process.env.PROCESSING_BATCH_SIZE ?? "");
-const batchSize = requestedBatchSize > 0 ? requestedBatchSize : Infinity;
 
 const steps: Step[] = [];
 
@@ -129,7 +127,6 @@ if (groupingCategories.length > 0 && groupingEnabled) {
         feedRefresher: miniflux,
         categoryTitles: groupingCategories,
         windowHours,
-        batchSize,
         log: stepLog("grouping"),
     }) });
 }
@@ -139,7 +136,6 @@ steps.push({ name: "filtering", run: makeEntryFilter({
     classifier,
     entryUpdater: miniflux,
     decisionStore: database,
-    batchSize,
     log: stepLog("filtering"),
 }) });
 

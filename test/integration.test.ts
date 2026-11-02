@@ -25,7 +25,6 @@ const app = makeApplicationRunner(ROOT, WEB, {
     OLLAMA_BASE_URL: FAKE_URL,
     OLLAMA_MODEL: 'test-model',
     AI_PROVIDER: 'OLLAMA',
-    PROCESSING_BATCH_SIZE: '10',
     DATABASE_PATH: DB_FILE,
     LOG_DIR,
     WEB_PORT: String(WEB_PORT),
@@ -153,31 +152,22 @@ test('entry classified as "yes" is not marked as read', async () => {
     assert.deepEqual(await miniflux.markedAsRead(), []);
 });
 
-test('filtering: one run classifies all entries batch by batch', async () => {
+test('filtering: one run classifies all entries one by one', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
     await ollama.replies('no');
 
-    await app.runOnce({ PROCESSING_BATCH_SIZE: '1' });
+    await app.runOnce();
 
     assert.deepEqual(await miniflux.markAsReadCalls(), [[ENTRY.id], [ENTRY_2.id]]);
     assert.equal(await miniflux.unreadRequested(FEED), 2);
 });
 
-test('filtering: a batch size below 1 means no limit', async () => {
-    await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.replies('no');
-
-    await app.runOnce({ PROCESSING_BATCH_SIZE: '-1' });
-
-    assert.deepEqual(await miniflux.markAsReadCalls(), [[ENTRY.id, ENTRY_2.id]]);
-});
-
-test('filtering: a failing entry is attempted once per run across batches', async () => {
+test('filtering: a failing entry is attempted once per run', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
     await ollama.failsToReply(ENTRY.title);
     await ollama.replies('no');
 
-    await app.runOnce({ PROCESSING_BATCH_SIZE: '1' });
+    await app.runOnce();
 
     const attempts = (await ollama.generateRequests()).filter((r) => JSON.stringify(r.body).includes(ENTRY.title));
     assert.equal(attempts.length, 1);
@@ -453,20 +443,11 @@ test('grouping: an entry whose classification fails does not block the others', 
     assert.deepEqual(await miniflux.markedAsRead(), [GROUP_ENTRY_B.id]);
 });
 
-test('grouping: unset batch size means no limit', async () => {
+test('grouping: one run groups all entries', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce({ ...DECISION_ENV, PROCESSING_BATCH_SIZE: '' });
-
-    assert.equal((await b2.publishedItems()).length, 1);
-});
-
-test('grouping: one run groups all entries batch by batch', async () => {
-    await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
-    await givenDecisions('yes');
-
-    await app.runOnce({ ...DECISION_ENV, PROCESSING_BATCH_SIZE: '1' });
+    await app.runOnce(DECISION_ENV);
 
     const [item] = await b2.publishedItems();
     assert.match(item, new RegExp(GROUP_ENTRY_A.url));
@@ -476,12 +457,12 @@ test('grouping: one run groups all entries batch by batch', async () => {
     assert.equal(await miniflux.unreadRequested(GROUP_FEED), 2);
 });
 
-test('grouping: a failing entry is attempted once per run across batches', async () => {
+test('grouping: a failing entry is attempted once per run', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await ollama.failsToDecide(GROUP_ENTRY_A.title);
     await givenDecisions('yes');
 
-    await app.runOnce({ ...DECISION_ENV, PROCESSING_BATCH_SIZE: '1' });
+    await app.runOnce(DECISION_ENV);
 
     const decisions = await ollama.decisionRequests();
     assert.equal(decisions.filter((r) => JSON.stringify(r.body).includes(GROUP_ENTRY_A.title)).length, 1);
