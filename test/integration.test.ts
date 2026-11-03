@@ -457,6 +457,21 @@ test('grouping: one run groups all entries', async () => {
     assert.equal(await miniflux.unreadRequested(GROUP_FEED), 2);
 });
 
+test('grouping: a failed refetch of unread entries still publishes what was grouped and fails the run', async () => {
+    await givenGrouping([GROUP_ENTRY_A]);
+    await miniflux.listsUnreadOnlyOnce([GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+
+    await app.start(DECISION_ENV);
+    await app.processNow();
+    await app.runFinished('failed');
+
+    const [item, ...others] = await b2.publishedItems();
+    assert.equal(others.length, 0);
+    assert.match(item, new RegExp(GROUP_ENTRY_A.url));
+    assert.deepEqual(await miniflux.markedAsRead(), [GROUP_ENTRY_A.id]);
+});
+
 test('grouping: a failing entry is attempted once per run', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await ollama.failsToDecide(GROUP_ENTRY_A.title);

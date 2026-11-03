@@ -57,16 +57,18 @@ const trackInParallel = (runs: IProcessing[]): IProcessing => ({
     },
 });
 
-const runInOrder = async (tasks: (() => Promise<void>)[]): Promise<void> => {
+const runInOrder = async (steps: Step[]): Promise<void> => {
     const errors: unknown[] = [];
-    for (const task of tasks) {
+    const failed: string[] = [];
+    for (const step of steps) {
         try {
-            await task();
+            await step.run();
         } catch (err) {
             errors.push(err);
+            failed.push(step.name);
         }
     }
-    if (errors.length > 0) throw new AggregateError(errors, "processing failed");
+    if (errors.length > 0) throw new AggregateError(errors, `${failed.join(", ")} failed`);
 };
 
 process.on("SIGTERM", () => process.exit(0));
@@ -140,7 +142,7 @@ steps.push({ name: "filtering", run: makeEntryFilter({
 }) });
 
 const runs = sequential
-    ? [trackRuns(logs, "processing", () => runInOrder(steps.map((s) => s.run)))]
+    ? [trackRuns(logs, "processing", () => runInOrder(steps))]
     : steps.map((s) => trackRuns(logs, s.name, s.run));
 const port = parseInt(process.env.WEB_PORT || "3000");
 startWebUi(

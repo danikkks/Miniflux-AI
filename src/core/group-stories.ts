@@ -80,9 +80,19 @@ export const makeStoryGrouper = ({
             }
             return unread.filter((e) => !alreadyGrouped.has(e.id));
         };
+        const fetchErrors: unknown[] = [];
+        const fetchUnhandledOrStopGrouping = async (): Promise<IEntry[]> => {
+            try {
+                return await fetchUnhandled();
+            } catch (err) {
+                fetchErrors.push(err);
+                log.error("fetching unread entries failed, grouping stopped", err);
+                return [];
+            }
+        };
         let grouped = 0;
         let failed = 0;
-        for (let pending = await fetchUnhandled(); pending.length > 0; pending = await fetchUnhandled()) {
+        for (let pending = await fetchUnhandledOrStopGrouping(); pending.length > 0; pending = await fetchUnhandledOrStopGrouping()) {
             log.info("%d to group", pending.length);
             for (const [i, entry] of pending.entries()) {
                 handled.add(entry.id);
@@ -142,5 +152,6 @@ export const makeStoryGrouper = ({
             "run finished in %ss: %d grouped, %d failed",
             ((Date.now() - startedAt) / 1000).toFixed(1), grouped, failed,
         );
+        if (fetchErrors.length > 0) throw new AggregateError(fetchErrors, "grouping stopped early: fetching unread entries failed");
     };
 };

@@ -44,6 +44,18 @@ export const miniflux = {
 
     failsToMarkAsRead: () => status('PUT', '/v1/entries', 500, OVERRIDE),
 
+    listsUnreadOnlyOnce: async (entries: Entry[]) => {
+        for (const feed of unique(entries.map((e) => e.feed))) {
+            const path = `/v1/feeds/${feed.id}/entries`;
+            await mock.mockAnyResponse({
+                ...json('GET', path, 200, { entries: entries.filter((e) => e.feed.id === feed.id) }),
+                priority: OVERRIDE + 1,
+                times: { remainingTimes: 1, unlimited: false },
+            });
+            await status('GET', path, 500, OVERRIDE);
+        }
+    },
+
     hasSubscriptions: (feeds: { id: number; feed_url: string }[]) => mock.mockAnyResponse(json('GET', '/v1/feeds', 200, feeds)),
 
     refreshesFeeds: () => status('PUT', '/v1/feeds/.*/refresh', 204),
