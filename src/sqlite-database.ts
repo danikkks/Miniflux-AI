@@ -176,7 +176,7 @@ export const makeSqliteGroupStore = (path: string): IGroupStore => {
                 from group_entries e join groups g on g.id = e.group_id
                 where e.group_id in (
                     select group_id from group_entries group by group_id
-                    having max(added_at) >= datetime('now', ?)
+                    having min(added_at) >= datetime('now', ?)
                 )
                 order by e.added_at, e.entry_id
             `).all(`-${hours} hours`) as GroupRow[];

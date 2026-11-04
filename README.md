@@ -19,5 +19,5 @@ Use AI to remove the noise from your [Miniflux](https://miniflux.app) feeds so o
   - `RUN_SEQUENTIALLY`: Set to `true` to run grouping, then group title and description generation, then filtering, one after another, so Ollama holds one model at a time. By default grouping and filtering run in parallel.
   - `GROUPED_FEED_KEY`: Optional object name of the feed (default: `grouped.xml`).
   - `GROUPED_FEED_TITLE`: Optional feed title (default: `Grouped articles`).
-  - `GROUPING_WINDOW_HOURS`: Optional time after its last article during which a group still accepts new ones, and stays in the feed (default: 48).
+  - `GROUPING_WINDOW_HOURS`: Optional time after its first article during which a group accepts new ones and stays in the feed; adding articles does not extend it (default: 48).
 - Run the script: `npm run start`, then press "process now" in the review UI. Nothing is processed until then, and each press runs grouping and filtering once, entry by entry, until a fetch from Miniflux has nothing left to group or filter. Without `RUN_SEQUENTIALLY=true`, articles the grouped feed gains during a press are filtered on the next press
