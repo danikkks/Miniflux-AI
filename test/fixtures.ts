@@ -1,7 +1,7 @@
 export const PROMPT = {
     category: 'tech',
     filename: 'custom-prompt-tech.md',
-    content: 'Is this about technology? Answer yes or no.',
+    content: 'Is this about technology?',
 };
 
 export const CATEGORY = { id: 1, title: 'Technology News', user_id: 1, hide_globally: false };

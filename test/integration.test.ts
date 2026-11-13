@@ -23,8 +23,7 @@ const app = makeApplicationRunner(ROOT, WEB, {
     MINIFLUX_URL: FAKE_URL,
     MINIFLUX_AUTH_TOKEN: 'test',
     OLLAMA_BASE_URL: FAKE_URL,
-    OLLAMA_MODEL: 'test-model',
-    AI_PROVIDER: 'OLLAMA',
+    OLLAMA_MODEL: 'nimble:latest',
     DATABASE_PATH: DB_FILE,
     LOG_DIR,
     WEB_PORT: String(WEB_PORT),
@@ -36,8 +35,7 @@ const app = makeApplicationRunner(ROOT, WEB, {
     B2_APPLICATION_KEY: 'app-key',
 });
 
-const FILTER_DECISION_ENV = { OLLAMA_DECISION_API: 'true', OLLAMA_MODEL: 'nimble:latest' };
-const DECISION_ENV = { ...FILTER_DECISION_ENV, OLLAMA_SUMMARY_MODEL: 'summary-model' };
+const GROUPING_ENV = { OLLAMA_SUMMARY_MODEL: 'summary-model' };
 
 let fakeServer: ChildProcess | undefined;
 
@@ -56,11 +54,15 @@ const givenGrouping = async (entries: Parameters<typeof miniflux.hasUnread>[0], 
     await b2.acceptsUploads();
 };
 
+const givenDecision = async (answer: 'yes' | 'no') => {
+    await ollama.supportsDecisions();
+    await ollama.decides(answer);
+};
+
 const givenDecisions = async (answer: 'yes' | 'no') => {
     await ollama.summarizes();
-    await ollama.supportsDecisions();
-    await ollama.decides('no', 'digest that covers');
-    await ollama.decides(answer);
+    await ollama.decides('no', 'several separate news stories');
+    await givenDecision(answer);
 };
 
 before(async () => {
@@ -84,7 +86,7 @@ after(async () => {
 
 test('nothing is processed until triggered from the ui', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.start();
 
@@ -105,7 +107,7 @@ test('app exits with an error when the review ui port is taken', async () => {
 
 test('entry classified as "no" is marked as read', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -117,7 +119,7 @@ const reviewRow = (decision: 'yes' | 'no', entry: typeof ENTRY) =>
 
 test('entry classified as "no" is listed for review with its decision', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -126,26 +128,16 @@ test('entry classified as "no" is listed for review with its decision', async ()
 
 test('entry classified as "yes" is listed for review with its decision', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('yes');
+    await givenDecision('yes');
 
     await app.runOnce();
 
     assert.match(await page('/pending'), reviewRow('yes', ENTRY));
 });
 
-test('answer with different case and surrounding whitespace counts as a decision', async () => {
-    await miniflux.hasUnread([ENTRY]);
-    await ollama.replies(' No\n');
-
-    await app.runOnce();
-
-    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
-    assert.match(await page('/pending'), reviewRow('no', ENTRY));
-});
-
 test('entry classified as "yes" is not marked as read', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('yes');
+    await givenDecision('yes');
 
     await app.runOnce();
 
@@ -154,7 +146,7 @@ test('entry classified as "yes" is not marked as read', async () => {
 
 test('filtering: one run classifies all entries one by one', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -164,33 +156,33 @@ test('filtering: one run classifies all entries one by one', async () => {
 
 test('filtering: a failing entry is attempted once per run', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.failsToReply(ENTRY.title);
-    await ollama.replies('no');
+    await ollama.failsToDecide(ENTRY.title);
+    await givenDecision('no');
 
     await app.runOnce();
 
-    const attempts = (await ollama.generateRequests()).filter((r) => JSON.stringify(r.body).includes(ENTRY.title));
+    const attempts = (await ollama.decisionRequests()).filter((r) => JSON.stringify(r.body).includes(ENTRY.title));
     assert.equal(attempts.length, 1);
     assert.deepEqual(await miniflux.markedAsRead(), [ENTRY_2.id]);
 });
 
-test('decision api: entry classified as "no" is marked as read', async () => {
-    await miniflux.hasUnread([ENTRY]);
-    await ollama.supportsDecisions();
-    await ollama.decides('no');
-
-    await app.runOnce(FILTER_DECISION_ENV);
-
-    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
-});
-
-test('decision api: model missing "decision" capability is never marked as read', async () => {
+test('model missing "decision" capability is never marked as read', async () => {
     await miniflux.hasUnread([ENTRY]);
     await ollama.lacksDecisions();
 
-    await app.runOnce(FILTER_DECISION_ENV);
+    await app.runOnce();
 
     assert.deepEqual(await miniflux.markedAsRead(), []);
+});
+
+test('short entry is classified with its body, not only its title', async () => {
+    await miniflux.hasUnread([ENTRY]);
+    await givenDecision('no');
+
+    await app.runOnce();
+
+    const [req] = await ollama.decisionRequests();
+    assert.match(req.body.json.state, new RegExp(ENTRY.content));
 });
 
 test('category without matching prompt - no feeds fetched', async () => {
@@ -204,7 +196,7 @@ test('category without matching prompt - no feeds fetched', async () => {
 
 test('review ui: marking a decision wrong yields a prompt-tweak text for the category', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -225,7 +217,7 @@ test('review ui: marking a decision wrong yields a prompt-tweak text for the cat
 
 test('review ui: decision not marked wrong is reported as correct', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('yes');
+    await givenDecision('yes');
 
     await app.runOnce();
 
@@ -236,7 +228,7 @@ test('review ui: decision not marked wrong is reported as correct', async () => 
 
 test('review ui: prompt includes decisions reviewed in earlier rounds', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -249,12 +241,12 @@ test('review ui: prompt includes decisions reviewed in earlier rounds', async ()
     assert.match(second, /Correct decisions \(1\)/);
 });
 
-test('decision api: oversized entry is truncated to fit the 64 KiB request limit', async () => {
+test('oversized entry is truncated to fit the 64 KiB request limit', async () => {
     await miniflux.hasUnread([{ ...ENTRY, content: 'x'.repeat(200_000) }]);
     await ollama.supportsDecisions();
     await ollama.decides('no');
 
-    await app.runOnce(FILTER_DECISION_ENV);
+    await app.runOnce();
 
     const [req] = await ollama.decisionRequests();
     const size = Number(req.headers['content-length'][0]);
@@ -263,7 +255,7 @@ test('decision api: oversized entry is truncated to fit the 64 KiB request limit
 
 test('review ui: subcategories share one prompt with their parent category', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_3]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -281,7 +273,7 @@ test('grouping: articles about the same story are published as one feed item', a
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const [item, ...others] = await b2.publishedItems();
     assert.equal(others.length, 0);
@@ -299,7 +291,7 @@ test('grouping: miniflux refreshes only the feed subscribed to the published fil
     await givenDecisions('yes');
     await miniflux.refreshesFeeds();
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const paths = (await recorded()).map((r) => r.path);
     assert.ok(paths.indexOf(PUBLISHED_FEED_PATH) < paths.indexOf('/v1/feeds/99/refresh'));
@@ -310,7 +302,7 @@ test('grouping: articles about different stories are published as separate feed 
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('no');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const published = await b2.publishedItems();
     assert.equal(published.length, 2);
@@ -322,7 +314,7 @@ test('grouping: grouped articles are marked as read in miniflux', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     assert.deepEqual((await miniflux.markedAsRead()).sort(), [GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
 });
@@ -330,13 +322,13 @@ test('grouping: grouped articles are marked as read in miniflux', async () => {
 test('grouping: article is added to a group stored by a previous run', async () => {
     await givenGrouping([GROUP_ENTRY_A]);
     await givenDecisions('yes');
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
     await app.stop();
 
     await resetFakes();
     await givenGrouping([GROUP_ENTRY_B]);
     await givenDecisions('yes');
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const [item, ...others] = await b2.publishedItems();
     assert.equal(others.length, 0);
@@ -349,15 +341,15 @@ test('grouping and filtering run side by side', async () => {
     await ollama.decides('yes', 'same news story');
     await givenDecisions('no');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     assert.deepEqual((await miniflux.markedAsRead()).sort(), [ENTRY.id, GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
     assert.equal((await b2.publishedItems()).length, 1);
 });
 
-test('grouping: nothing is published when the decision api is turned off', async () => {
+test('grouping: nothing is published without a summary model', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
-    await ollama.replies('yes');
+    await givenDecision('yes');
 
     await app.runOnce();
 
@@ -369,7 +361,7 @@ test('grouping: subcategory articles are grouped together with their parent cate
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_C]);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const [item, ...others] = await b2.publishedItems();
     assert.equal(others.length, 0);
@@ -379,10 +371,10 @@ test('grouping: subcategory articles are grouped together with their parent cate
 
 test('grouping: a digest is neither grouped nor marked as read', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_DIGEST]);
-    await ollama.decides('yes', `${GROUP_DIGEST.title}.*digest that covers`);
+    await ollama.decides('yes', `${GROUP_DIGEST.title}.*several separate news stories`);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const published = await b2.publishedItems();
     assert.equal(published.length, 1);
@@ -395,7 +387,7 @@ test('grouping: group title and description are generated by the summary model',
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const [item] = await b2.publishedItems();
     assert.match(item, /<title>Generated title<\/title>/);
@@ -410,7 +402,7 @@ test('grouping: summaries are generated only after all grouping decisions', asyn
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const paths = (await recorded()).map((r) => r.path);
     assert.ok(paths.includes('/api/generate'));
@@ -421,7 +413,7 @@ test('sequential mode: filtering starts only after grouping and summary generati
     await givenGrouping([ENTRY, GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce({ ...DECISION_ENV, RUN_SEQUENTIALLY: 'true' });
+    await app.runOnce({ ...GROUPING_ENV, RUN_SEQUENTIALLY: 'true' });
 
     const all = await recorded();
     const filterDecision = all.findIndex((r) => r.path === '/v1/systemone' && JSON.stringify(r.body).includes(PROMPT.content));
@@ -434,7 +426,7 @@ test('grouping: an entry whose classification fails does not block the others', 
     await ollama.failsToDecide(GROUP_ENTRY_A.title);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const [item, ...others] = await b2.publishedItems();
     assert.equal(others.length, 0);
@@ -447,7 +439,7 @@ test('grouping: one run groups all entries', async () => {
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const [item] = await b2.publishedItems();
     assert.match(item, new RegExp(GROUP_ENTRY_A.url));
@@ -462,7 +454,7 @@ test('grouping: a failed refetch of unread entries still publishes what was grou
     await miniflux.listsUnreadOnlyOnce([GROUP_ENTRY_A]);
     await givenDecisions('yes');
 
-    await app.start(DECISION_ENV);
+    await app.start(GROUPING_ENV);
     await app.processNow();
     await app.runFinished('failed');
 
@@ -477,7 +469,7 @@ test('grouping: a failing entry is attempted once per run', async () => {
     await ollama.failsToDecide(GROUP_ENTRY_A.title);
     await givenDecisions('yes');
 
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     const decisions = await ollama.decisionRequests();
     assert.equal(decisions.filter((r) => JSON.stringify(r.body).includes(GROUP_ENTRY_A.title)).length, 1);
@@ -488,7 +480,7 @@ test('grouping: entries are left unread when the b2 settings are incomplete', as
     await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await givenDecisions('yes');
 
-    await app.runOnce({ ...DECISION_ENV, B2_BUCKET: '' });
+    await app.runOnce({ ...GROUPING_ENV, B2_BUCKET: '' });
 
     assert.deepEqual(await miniflux.markedAsRead(), []);
 });
@@ -497,13 +489,13 @@ test('grouping: a grouped entry whose mark-as-read failed is marked on the next 
     await givenGrouping([GROUP_ENTRY_A]);
     await miniflux.failsToMarkAsRead();
     await givenDecisions('yes');
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
     await app.stop();
 
     await resetFakes();
     await givenGrouping([GROUP_ENTRY_A]);
     await givenDecisions('yes');
-    await app.runOnce(DECISION_ENV);
+    await app.runOnce(GROUPING_ENV);
 
     assert.deepEqual(await miniflux.markedAsRead(), [GROUP_ENTRY_A.id]);
     assert.equal((await ollama.decisionRequests()).length, 0);
@@ -511,7 +503,7 @@ test('grouping: a grouped entry whose mark-as-read failed is marked on the next 
 
 test('review ui: discarding keeps the newest decisions and drops the rest from prompt history', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -528,7 +520,7 @@ test('review ui: discarding keeps the newest decisions and drops the rest from p
 
 test('review ui: a changed decision brings the entry back for review without its verdict', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('yes');
+    await givenDecision('yes');
     await app.runOnce();
     assert.match(await page('/pending'), new RegExp(ENTRY.title));
     await postForm('/review', [[`verdict-${ENTRY.id}`, 'wrong']]);
@@ -537,7 +529,7 @@ test('review ui: a changed decision brings the entry back for review without its
 
     await resetFakes();
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('no');
+    await givenDecision('no');
     await app.runOnce();
 
     const pending = await page('/pending');
@@ -564,7 +556,7 @@ test('review ui: submitting a review with no decision marked is rejected', async
 
 test('review ui: discarding keeps verdicts picked but not yet submitted', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -574,7 +566,7 @@ test('review ui: discarding keeps verdicts picked but not yet submitted', async 
 
 test('review ui: decisions with a verdict do not count toward the kept newest ones', async () => {
     await miniflux.hasUnread([ENTRY, ENTRY_2]);
-    await ollama.replies('no');
+    await givenDecision('no');
 
     await app.runOnce();
 
@@ -587,7 +579,7 @@ test('review ui: decisions with a verdict do not count toward the kept newest on
 
 test('review ui: processing started from the ui runs in the background and reports completion', async () => {
     await miniflux.hasUnread([ENTRY]);
-    await ollama.replies('no');
+    await givenDecision('no');
     await app.start();
 
     assert.match(await app.processNow(), /processing\.\.\./);

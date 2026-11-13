@@ -30,7 +30,6 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",
     "ollama": "^0.6.4",
-    "openai": "^5.23.1",
     "string-strip-html": "^13.4.13",
     "turndown": "^7.2.4"
   }

@@ -26,7 +26,7 @@ src/
     group-stories.ts    -- makeStoryGrouper(): group same-story entries, summarize, publish feed
     review-decisions.ts -- makeReviewService(): review queue and prompt-tweak text
   miniflux.ts       -- Miniflux REST API client
-  ai-classifier.ts  -- IAIClassifier implementations (Ollama + OpenAI)
+  ai-classifier.ts  -- IAIClassifier implementation (Ollama decision api)
   web-ui.ts         -- inbound adapter: htmx review UI (node:http), depends on IReviewService
   sqlite-database.ts -- IDecisionStore, IReviewStore and IGroupStore implementations (node:sqlite)
   ai-summarizer.ts  -- IGroupSummarizer implementation (Ollama generate)
@@ -53,7 +53,7 @@ custom-prompt-*.md -- user-defined prompts (read from the working directory)
 
 ### Grouping
 
-When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DECISION_API=true`, and `OLLAMA_SUMMARY_MODEL` set; otherwise grouping is skipped with a warning), `bootstrap.ts` runs the story grouper in parallel with the entry filter (races on Miniflux are accepted; the grouped feed is refreshed at the end of grouping, so its new entries are filtered on the next press), or, with `RUN_SEQUENTIALLY=true`, before the entry filter. For each unread entry of those categories (and their "Parent / Child" subcategories), the classifier is asked, one group at a time, per open group (started within `GROUPING_WINDOW_HOURS`; later articles do not extend it) whether the entry is about the same story as the group's first entry; first "yes" wins, otherwise a new group starts. Entries are grouped one by one; once the fetched entries are used up, unread entries are fetched again (Miniflux returns at most 100 per feed), until a fetch has nothing left to group; entries handled earlier in the run are skipped. Entries the classifier calls a digest (several separate stories) are skipped: not grouped, not marked read, remembered in memory. Once all decisions of a run are done, groups whose member count changed get a generated title and description (`ai-summarizer.ts`, Ollama `generate` with `OLLAMA_SUMMARY_MODEL`); the title also replaces the first article's title in later same-story questions. Each entry is marked as read right after it is stored and a failing entry is only logged and retried next run (grouped entries still unread are re-marked first). If fetching unread entries fails mid-run, grouping stops, the groups made so far are still summarized and published, and the run is then reported as failed. Grouped entries are marked as read, groups live in the same SQLite file, and the whole feed (one item per group, guid `group-<id>`) is uploaded to B2 when it changed. Miniflux subscribes to the public object URL; after each changed upload, every Miniflux feed whose URL contains the bucket name and ends with `/<GROUPED_FEED_KEY>` is refreshed via `PUT /v1/feeds/<id>/refresh`.
+When `GROUPING_CATEGORIES` is set (and `OLLAMA_SUMMARY_MODEL` and all `B2_*` variables are; otherwise grouping is skipped with a warning), `bootstrap.ts` runs the story grouper in parallel with the entry filter (races on Miniflux are accepted; the grouped feed is refreshed at the end of grouping, so its new entries are filtered on the next press), or, with `RUN_SEQUENTIALLY=true`, before the entry filter. For each unread entry of those categories (and their "Parent / Child" subcategories), the classifier is asked, one group at a time, per open group (started within `GROUPING_WINDOW_HOURS`; later articles do not extend it) whether the entry is about the same story as the group's first entry; first "yes" wins, otherwise a new group starts. Entries are grouped one by one; once the fetched entries are used up, unread entries are fetched again (Miniflux returns at most 100 per feed), until a fetch has nothing left to group; entries handled earlier in the run are skipped. Entries the classifier calls a digest (several separate stories) are skipped: not grouped, not marked read, remembered in memory. Once all decisions of a run are done, groups whose member count changed get a generated title and description (`ai-summarizer.ts`, Ollama `generate` with `OLLAMA_SUMMARY_MODEL`); the title also replaces the first article's title in later same-story questions. Each entry is marked as read right after it is stored and a failing entry is only logged and retried next run (grouped entries still unread are re-marked first). If fetching unread entries fails mid-run, grouping stops, the groups made so far are still summarized and published, and the run is then reported as failed. Grouped entries are marked as read, groups live in the same SQLite file, and the whole feed (one item per group, guid `group-<id>`) is uploaded to B2 when it changed. Miniflux subscribes to the public object URL; after each changed upload, every Miniflux feed whose URL contains the bucket name and ends with `/<GROUPED_FEED_KEY>` is refreshed via `PUT /v1/feeds/<id>/refresh`.
 
 ### Review UI
 
@@ -76,15 +76,13 @@ When `GROUPING_CATEGORIES` is set and the Ollama decision api is on (`OLLAMA_DEC
 | `ILogger` | `makeLogs()` in `logger.ts`, one per process (`filtering`, `grouping`, `web`, `app`) |
 | `IProcessing` | `trackRuns()` / `trackInParallel()` in `bootstrap.ts`, consumed by `web-ui.ts` |
 
-### AI providers
+### Classification
 
-Controlled by `AI_PROVIDER` env var:
-- `OPENAI` - uses `openai` SDK, model `gpt-5-nano`
-- anything else (default) - uses `ollama` SDK with `OLLAMA_BASE_URL` and `OLLAMA_MODEL`
+Every yes/no question goes to Ollama's decision api (`ollama.systemone`, `POST /v1/systemone`) with `OLLAMA_MODEL` as one `noul` question; a probability of true of at least 0.5 means yes. The model must report the `decision` capability. Questions may pass `noul` criteria describing what true and false mean (the digest check does).
 
 ### Custom prompts
 
-Files named `custom-prompt-<category>.md` placed in the working directory (the project root for `npm start` and tests, `/app` in Docker). The `<category>` part must be a case-insensitive substring of a Miniflux category title. The file content is sent as the AI system prompt/instruction; the entry title and content are the input.
+Files named `custom-prompt-<category>.md` placed in the working directory (the project root for `npm start` and tests, `/app` in Docker). The `<category>` part must be a case-insensitive substring of a Miniflux category title. The file content is sent as the question's instructions; the entry title and content are the state.
 
 
 ## Testing
@@ -121,7 +119,7 @@ test/
 
 - Use `before` / `beforeEach` / `after` hooks for MockServer and child process lifecycle
 - Each test registers its own mock expectations independently
-- Set up and assert through the fake servers in their own terms (`miniflux.hasUnread([ENTRY])`, `ollama.replies('no')`, `miniflux.markedAsRead()`, `b2.publishedItems()`), not raw MockServer calls; `miniflux.hasUnread` derives categories and feeds from the entries. Failure responses (`failsToMarkAsRead`, `failsToDecide`, `failsToReply`) use a higher MockServer priority, so they override regardless of order; other expectations match in the order they are registered
+- Set up and assert through the fake servers in their own terms (`miniflux.hasUnread([ENTRY])`, `ollama.decides('no')`, `miniflux.markedAsRead()`, `b2.publishedItems()`), not raw MockServer calls; `miniflux.hasUnread` derives categories and feeds from the entries. Failure responses (`failsToMarkAsRead`, `failsToDecide`) use a higher MockServer priority, so they override regardless of order; other expectations match in the order they are registered
 - Drive the process through `app` (`runOnce(env)` starts it and presses "process now", `start(env)` only waits for the UI; also `runFinished('failed')`, `stop()`, `processNow()`, and `launch(env)` with `exitCode()` to start without waiting and await the exit); never sleep or poll the mocks: `runFinished()` polls `GET /process` until the run is over and asserts it completed (or failed)
 
 ### Environment variables
@@ -131,10 +129,8 @@ test/
 |---|---|---|---|
 | `MINIFLUX_URL` | yes | - | Miniflux base URL |
 | `MINIFLUX_AUTH_TOKEN` | yes | - | Miniflux personal access token |
-| `AI_PROVIDER` | no | Ollama | Set to `OPENAI` to use OpenAI |
-| `OPENAI_API_KEY` | if OPENAI | - | OpenAI API key |
-| `OLLAMA_BASE_URL` | if Ollama | - | Ollama server URL |
-| `OLLAMA_MODEL` | if Ollama | - | Ollama model name |
+| `OLLAMA_BASE_URL` | no | http://127.0.0.1:11434 | Ollama server URL |
+| `OLLAMA_MODEL` | yes | - | Ollama model with the `decision` capability |
 | `DATABASE_PATH` | no | miniflux-ai.db | SQLite database file |
 | `WEB_PORT` | no | 3000 | Port of the review UI |
 | `GROUPING_CATEGORIES` | no | - | Comma-separated category titles to group; enables grouping |

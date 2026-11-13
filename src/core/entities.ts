@@ -86,8 +86,10 @@ export interface IFeedReader {
     getUnreadEntries(feedId: string): Promise<IEntry[]>;
 }
 
+export type ICriteria = { true: string; false: string };
+
 export interface IAIClassifier {
-    classify(entry: IEntry, prompt: string): Promise<boolean>;
+    classify(entry: IEntry, prompt: string, criteria?: ICriteria): Promise<boolean>;
 }
 
 export interface IEntryUpdater {

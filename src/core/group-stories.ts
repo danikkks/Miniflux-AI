@@ -13,11 +13,14 @@ import type {
 } from "./entities.js";
 
 const sameStoryPrompt = (group: IGroup): string =>
-    `Is the article below about the same news story or event as "${group.summary?.title ?? group.entries[0].title}"? Answer yes or no.`;
+    `Is the article below about the same news story or event as "${group.summary?.title ?? group.entries[0].title}"?`;
 
-const DIGEST_PROMPT =
-    "Is the article below a digest that covers several separate news stories, each with its own body text? " +
-    "\"Read also\" and related-links sections are not stories. Answer yes or no.";
+const DIGEST_PROMPT = "Is the article below a digest?";
+
+const DIGEST_CRITERIA = {
+    true: "it covers several separate news stories, each with its own body text",
+    false: "it covers a single story; \"Read also\" and related-links sections are not stories",
+};
 
 export type StoryGrouperDeps = {
     feedReader: IFeedReader;
@@ -99,7 +102,7 @@ export const makeStoryGrouper = ({
                 const progress = `[${i + 1}/${pending.length}] entry ${entry.id} "${entry.title}"`;
                 log.debug("grouping entry %s", entry.id, entry);
                 try {
-                    if (await classifier.classify(entry, DIGEST_PROMPT)) {
+                    if (await classifier.classify(entry, DIGEST_PROMPT, DIGEST_CRITERIA)) {
                         digestIds.push(entry.id);
                         log.info("%s -> digest, skipped", progress);
                         continue;

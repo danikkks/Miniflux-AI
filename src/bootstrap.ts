@@ -81,13 +81,7 @@ const miniflux = makeMinifluxClient(
     requireEnv("MINIFLUX_URL"),
     requireEnv("MINIFLUX_AUTH_TOKEN"),
 );
-const classifier = makeAIClassifier({
-    useOpenAI: process.env.AI_PROVIDER === "OPENAI",
-    openaiApiKey: process.env.OPENAI_API_KEY || "",
-    ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
-    ollamaModel: process.env.OLLAMA_MODEL,
-    useDecisionApi: process.env.OLLAMA_DECISION_API === "true",
-});
+const classifier = makeAIClassifier(process.env.OLLAMA_BASE_URL, requireEnv("OLLAMA_MODEL"));
 const promptLoader = makePromptLoader(process.cwd());
 const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
 const database = makeSqliteDatabase(databasePath);
@@ -98,12 +92,11 @@ const groupingCategories = (process.env.GROUPING_CATEGORIES || "")
     .split(",")
     .map((c) => c.trim())
     .filter(Boolean);
-const decisionApi = process.env.AI_PROVIDER !== "OPENAI" && process.env.OLLAMA_DECISION_API === "true";
 const summaryModel = process.env.OLLAMA_SUMMARY_MODEL;
 const b2Configured = ["B2_ENDPOINT", "B2_REGION", "B2_BUCKET", "B2_KEY_ID", "B2_APPLICATION_KEY"].every((v) => process.env[v]);
-const groupingEnabled = decisionApi && Boolean(summaryModel) && b2Configured;
+const groupingEnabled = Boolean(summaryModel) && b2Configured;
 if (groupingCategories.length > 0 && !groupingEnabled) {
-    appLog.info("grouping is disabled: it requires OLLAMA_DECISION_API=true, OLLAMA_SUMMARY_MODEL and all B2_* variables");
+    appLog.info("grouping is disabled: it requires OLLAMA_SUMMARY_MODEL and all B2_* variables");
 }
 if (groupingCategories.length > 0 && groupingEnabled) {
     const groups = makeSqliteGroupStore(databasePath);
