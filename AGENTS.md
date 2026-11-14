@@ -78,7 +78,7 @@ When `GROUPING_CATEGORIES` is set (and `OLLAMA_SUMMARY_MODEL` and all `B2_*` var
 
 ### Classification
 
-Every yes/no question goes to Ollama's decision api (`ollama.systemone`, `POST /v1/systemone`) with `OLLAMA_MODEL` as one `noul` question; a probability of true of at least 0.5 means yes. The entry filter marks an entry as read only below 0.3; the band from 0.3 up to 0.5 is "unsure" and is saved as "yes" (left unread). The model must report the `decision` capability. Questions may pass `noul` criteria describing what true and false mean (the digest check does).
+Every yes/no question goes to Ollama's decision api (`ollama.systemone`, `POST /v1/systemone`) with `OLLAMA_MODEL` as one `noul` question; a probability of true of at least 0.5 means yes. The entry filter marks an entry as read only below 0.3; the band from 0.3 up to 0.5 is "unsure" and is saved as "yes" (left unread). The model must report the `decision` capability. Questions may pass `noul` criteria describing what true and false mean (the digest and same-story checks do) and a reference story (title and excerpt of the group's first entry) that goes into the state before the article, not into the instructions.
 
 ### Custom prompts
 

@@ -1,7 +1,7 @@
 import { Ollama } from "ollama/dist/index.cjs";
 import { stripHtml } from "string-strip-html";
 import TurndownService from "turndown";
-import type { IAIClassifier, ICriteria, IEntry } from "./core/entities.js";
+import type { IAIClassifier, ICriteria, IEntry, IReference } from "./core/entities.js";
 
 const DECISION_CAPABILITY = "decision";
 const DECISION_QUESTION_KEY = "relevant";
@@ -9,6 +9,7 @@ const SYSTEMONE_TOKEN_LIMIT = 8194;
 const SYSTEMONE_TOKEN_TARGET = SYSTEMONE_TOKEN_LIMIT * 0.9;
 const SYSTEMONE_MAX_ATTEMPTS = 3;
 const SYSTEMONE_BODY_LIMIT_BYTES = 64 * 1024 * 0.9;
+const REFERENCE_EXCERPT_LENGTH = 500;
 
 const structurePreservingHtmlToText = new TurndownService({ headingStyle: "atx" }).addRule("linkText", {
     filter: "a",
@@ -35,17 +36,22 @@ const overflowTokenCount = (err: unknown): number | null => {
     return match ? Number(match[1]) : null;
 };
 
+const stateOf = (entry: IEntry, reference?: IReference): string => {
+    const article = `${stripHtml(entry.title).result}\n${structurePreservingHtmlToText.turndown(entry.content)}`;
+    if (!reference) return article;
+    const excerpt = structurePreservingHtmlToText.turndown(reference.content).slice(0, REFERENCE_EXCERPT_LENGTH);
+    return `Reference story:\n${stripHtml(reference.title).result}\n${excerpt}\n\nArticle:\n${article}`;
+};
+
 const supportsDecisionApi = async (client: Ollama, model: string): Promise<boolean> => {
     const info = await client.show({ model });
     return info.capabilities.includes(DECISION_CAPABILITY);
 };
 
 const classifyWithDecisionApi = async (
-    client: Ollama, model: string, entry: IEntry, prompt: string, criteria?: ICriteria,
+    client: Ollama, model: string, entry: IEntry, prompt: string, criteria?: ICriteria, reference?: IReference,
 ): Promise<number> => {
-    const title = stripHtml(entry.title).result;
-    const body = structurePreservingHtmlToText.turndown(entry.content);
-    let state = fitToBodyLimit(model, `${title}\n${body}`, prompt, criteria);
+    let state = fitToBodyLimit(model, stateOf(entry, reference), prompt, criteria);
 
     for (let attempt = 1; attempt <= SYSTEMONE_MAX_ATTEMPTS; attempt++) {
         try {
@@ -67,14 +73,14 @@ export const makeAIClassifier = (ollamaBaseUrl: string | undefined, model: strin
     let decisionApiChecked = false;
 
     return {
-        classify: async (entry, prompt, criteria) => {
+        classify: async (entry, prompt, criteria, reference) => {
             if (!decisionApiChecked) {
                 if (!(await supportsDecisionApi(client, model))) {
                     throw new Error(`model "${model}" does not support the decision api`);
                 }
                 decisionApiChecked = true;
             }
-            return classifyWithDecisionApi(client, model, entry, prompt, criteria);
+            return classifyWithDecisionApi(client, model, entry, prompt, criteria, reference);
         },
     };
 };

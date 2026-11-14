@@ -1,6 +1,7 @@
 import { parentCategory, YES_PROBABILITY } from "./entities.js";
 import type {
     IAIClassifier,
+    IReference,
     IEntryUpdater,
     IFeedPublisher,
     IFeedReader,
@@ -12,8 +13,17 @@ import type {
     ILogger,
 } from "./entities.js";
 
-const sameStoryPrompt = (group: IGroup): string =>
-    `Is the article below about the same news story or event as "${group.summary?.title ?? group.entries[0].title}"?`;
+const SAME_STORY_PROMPT = "Is the article about the same news story or event as the reference story?";
+
+const SAME_STORY_CRITERIA = {
+    true: "it reports the same event as the reference story, or a direct development or consequence of it",
+    false: "it is about a different event, even if it shares the topic, place or people with the reference story",
+};
+
+const referenceOf = (group: IGroup): IReference => ({
+    title: group.summary?.title ?? group.entries[0].title,
+    content: group.entries[0].content,
+});
 
 const DIGEST_PROMPT = "Is the article below a digest?";
 
@@ -109,7 +119,7 @@ export const makeStoryGrouper = ({
                     }
                     let match: IGroup | undefined;
                     for (const group of open) {
-                        if (await classifier.classify(entry, sameStoryPrompt(group)) >= YES_PROBABILITY) {
+                        if (await classifier.classify(entry, SAME_STORY_PROMPT, SAME_STORY_CRITERIA, referenceOf(group)) >= YES_PROBABILITY) {
                             match = group;
                             break;
                         }

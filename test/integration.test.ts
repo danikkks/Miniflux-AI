@@ -345,6 +345,19 @@ test('grouping: article is added to a group stored by a previous run', async () 
     assert.match(item, new RegExp(GROUP_ENTRY_B.url));
 });
 
+test('grouping: the same-story question carries the group\'s first article as a reference in the state', async () => {
+    await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await givenDecisions('yes');
+
+    await app.runOnce(GROUPING_ENV);
+
+    const [sameStory] = (await ollama.decisionRequests())
+        .filter((r) => JSON.stringify(r.body).includes('the reference story?'))
+        .map((r) => r.body.json);
+    assert.match(sameStory.state, new RegExp(`Reference story:\\n${GROUP_ENTRY_A.title}\\n${GROUP_ENTRY_A.content}`));
+    assert.match(sameStory.state, new RegExp(`Article:\\n${GROUP_ENTRY_B.title}`));
+});
+
 test('grouping and filtering run side by side', async () => {
     await givenGrouping([ENTRY, GROUP_ENTRY_A, GROUP_ENTRY_B]);
     await ollama.decides('yes', 'same news story');

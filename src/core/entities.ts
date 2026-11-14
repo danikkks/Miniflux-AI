@@ -89,10 +89,12 @@ export interface IFeedReader {
 export const NO_PROBABILITY = 0.3;
 export const YES_PROBABILITY = 0.5;
 
+export type IReference = { title: string; content: string };
+
 export type ICriteria = { true: string; false: string };
 
 export interface IAIClassifier {
-    classify(entry: IEntry, prompt: string, criteria?: ICriteria): Promise<number>;
+    classify(entry: IEntry, prompt: string, criteria?: ICriteria, reference?: IReference): Promise<number>;
 }
 
 export interface IEntryUpdater {
