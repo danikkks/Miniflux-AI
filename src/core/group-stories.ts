@@ -1,4 +1,4 @@
-import { parentCategory } from "./entities.js";
+import { parentCategory, YES_PROBABILITY } from "./entities.js";
 import type {
     IAIClassifier,
     IEntryUpdater,
@@ -102,14 +102,14 @@ export const makeStoryGrouper = ({
                 const progress = `[${i + 1}/${pending.length}] entry ${entry.id} "${entry.title}"`;
                 log.debug("grouping entry %s", entry.id, entry);
                 try {
-                    if (await classifier.classify(entry, DIGEST_PROMPT, DIGEST_CRITERIA)) {
+                    if (await classifier.classify(entry, DIGEST_PROMPT, DIGEST_CRITERIA) >= YES_PROBABILITY) {
                         digestIds.push(entry.id);
                         log.info("%s -> digest, skipped", progress);
                         continue;
                     }
                     let match: IGroup | undefined;
                     for (const group of open) {
-                        if (await classifier.classify(entry, sameStoryPrompt(group))) {
+                        if (await classifier.classify(entry, sameStoryPrompt(group)) >= YES_PROBABILITY) {
                             match = group;
                             break;
                         }

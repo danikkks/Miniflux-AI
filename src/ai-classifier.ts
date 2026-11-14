@@ -42,7 +42,7 @@ const supportsDecisionApi = async (client: Ollama, model: string): Promise<boole
 
 const classifyWithDecisionApi = async (
     client: Ollama, model: string, entry: IEntry, prompt: string, criteria?: ICriteria,
-): Promise<boolean> => {
+): Promise<number> => {
     const title = stripHtml(entry.title).result;
     const body = structurePreservingHtmlToText.turndown(entry.content);
     let state = fitToBodyLimit(model, `${title}\n${body}`, prompt, criteria);
@@ -51,7 +51,8 @@ const classifyWithDecisionApi = async (
         try {
             const r = await client.systemone(systemoneRequest(model, state, prompt, criteria));
             const answer = r.answers[DECISION_QUESTION_KEY];
-            return answer.type === "noul" && answer.noul >= 0.5;
+            if (answer.type !== "noul") throw new Error(`unexpected answer type "${answer.type}"`);
+            return answer.noul;
         } catch (err) {
             const actualTokens = overflowTokenCount(err);
             if (actualTokens === null || attempt === SYSTEMONE_MAX_ATTEMPTS) throw err;

@@ -4,7 +4,7 @@ import { createClient, entryUpdate, json, type RecordedRequest } from './mockser
 type Category = { id: number; title: string };
 type Feed = { id: number; category: Category };
 type Entry = { id: number; title: string; url: string; content: string; feed: Feed };
-type Answer = 'yes' | 'no';
+type Answer = 'yes' | 'no' | 'unsure';
 
 export const FAKE_PORT = 18080;
 export const FAKE_URL = `http://localhost:${FAKE_PORT}`;
@@ -75,7 +75,7 @@ export const miniflux = {
 
 const decision = (answer: Answer) => ({
     model: 'nimble:latest',
-    answers: { relevant: { type: 'noul', noul: answer === 'yes' ? 0.9 : 0.1 } },
+    answers: { relevant: { type: 'noul', noul: { yes: 0.9, no: 0.1, unsure: 0.4 }[answer] } },
     usage: { input_tokens: 1, output_tokens: 1 },
 });
 

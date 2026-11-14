@@ -168,6 +168,7 @@ sequenceDiagram
 - Each category is matched to the user's prompt written for it.
 - Entries are fetched repeatedly, because Miniflux returns only a limited number at a time.
 - If the classifier fails or gives an unclear answer, the entry stays unread and is retried on the next run.
+- An unsure answer (probability of relevance between 0.3 and 0.5) leaves the entry unread, so only a confident "no" hides an entry.
 - A decision that changes on a later run goes back to the review queue.
 
 ## Grouping Stories and Publishing the Feed

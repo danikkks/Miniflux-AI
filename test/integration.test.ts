@@ -54,7 +54,7 @@ const givenGrouping = async (entries: Parameters<typeof miniflux.hasUnread>[0], 
     await b2.acceptsUploads();
 };
 
-const givenDecision = async (answer: 'yes' | 'no') => {
+const givenDecision = async (answer: 'yes' | 'no' | 'unsure') => {
     await ollama.supportsDecisions();
     await ollama.decides(answer);
 };
@@ -133,6 +133,15 @@ test('entry classified as "yes" is listed for review with its decision', async (
     await app.runOnce();
 
     assert.match(await page('/pending'), reviewRow('yes', ENTRY));
+});
+
+test('entry with an unsure classification is not marked as read', async () => {
+    await miniflux.hasUnread([ENTRY]);
+    await givenDecision('unsure');
+
+    await app.runOnce();
+
+    assert.deepEqual(await miniflux.markedAsRead(), []);
 });
 
 test('entry classified as "yes" is not marked as read', async () => {

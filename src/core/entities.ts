@@ -86,10 +86,14 @@ export interface IFeedReader {
     getUnreadEntries(feedId: string): Promise<IEntry[]>;
 }
 
+// probability of true below which an answer is a confident "no"; the band up to YES_PROBABILITY is unsure
+export const NO_PROBABILITY = 0.3;
+export const YES_PROBABILITY = 0.5;
+
 export type ICriteria = { true: string; false: string };
 
 export interface IAIClassifier {
-    classify(entry: IEntry, prompt: string, criteria?: ICriteria): Promise<boolean>;
+    classify(entry: IEntry, prompt: string, criteria?: ICriteria): Promise<number>;
 }
 
 export interface IEntryUpdater {

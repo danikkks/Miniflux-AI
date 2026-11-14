@@ -1,4 +1,4 @@
-import { findPromptForCategory } from "./entities.js";
+import { findPromptForCategory, NO_PROBABILITY, YES_PROBABILITY } from "./entities.js";
 import type {
     ICategory,
     ICustomPrompt,
@@ -48,8 +48,10 @@ export const makeEntryFilter = ({
         if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
         log.debug("classifying entry %s", entry.id, entry);
         try {
-            const decision = (await classifier.classify(entry, prompt.content)) ? "yes" : "no";
-            log.info("%s entry %s \"%s\" -> %s", progress, entry.id, entry.title, decision === "yes" ? "relevant" : "irrelevant");
+            const probability = await classifier.classify(entry, prompt.content);
+            const decision = probability < NO_PROBABILITY ? "no" : "yes";
+            const verdict = decision === "no" ? "irrelevant" : probability >= YES_PROBABILITY ? "relevant" : "unsure, left unread";
+            log.info("%s entry %s \"%s\" -> %s", progress, entry.id, entry.title, verdict);
             return { entry, decision };
         } catch (err) {
             log.error("%s entry %s \"%s\" failed, retrying next run", progress, entry.id, entry.title, err);
