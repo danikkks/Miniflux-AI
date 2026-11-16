@@ -54,12 +54,12 @@ const givenGrouping = async (entries: Parameters<typeof miniflux.hasUnread>[0], 
     await b2.acceptsUploads();
 };
 
-const givenDecision = async (answer: 'yes' | 'no' | 'unsure') => {
+const givenDecision = async (answer: 'yes' | 'likely' | 'no' | 'unsure') => {
     await ollama.supportsDecisions();
     await ollama.decides(answer);
 };
 
-const givenDecisions = async (answer: 'yes' | 'no') => {
+const givenDecisions = async (answer: 'yes' | 'likely' | 'no') => {
     await ollama.summarizes();
     await ollama.decides('no', 'several separate news stories');
     await givenDecision(answer);
@@ -356,6 +356,32 @@ test('grouping: the same-story question carries the group\'s first article as a 
         .map((r) => r.body.json);
     assert.match(sameStory.state, new RegExp(`Reference story:\\n${GROUP_ENTRY_A.title}\\n${GROUP_ENTRY_A.content}`));
     assert.match(sameStory.state, new RegExp(`Article:\\n${GROUP_ENTRY_B.title}`));
+});
+
+test('grouping: a likely but not confident match starts a new group', async () => {
+    await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await givenDecisions('likely');
+
+    await app.runOnce(GROUPING_ENV);
+
+    assert.equal((await b2.publishedItems()).length, 2);
+});
+
+test('grouping: the generated group title does not replace the first article in the reference story', async () => {
+    await givenGrouping([GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+    await app.runOnce(GROUPING_ENV);
+    await app.stop();
+
+    await resetFakes();
+    await givenGrouping([GROUP_ENTRY_B]);
+    await givenDecisions('yes');
+    await app.runOnce(GROUPING_ENV);
+
+    const [sameStory] = (await ollama.decisionRequests())
+        .filter((r) => JSON.stringify(r.body).includes('the reference story?'))
+        .map((r) => r.body.json);
+    assert.match(sameStory.state, new RegExp(`Reference story:\\n${GROUP_ENTRY_A.title}\\n`));
 });
 
 test('grouping and filtering run side by side', async () => {

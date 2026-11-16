@@ -16,12 +16,14 @@ import type {
 const SAME_STORY_PROMPT = "Is the article about the same news story or event as the reference story?";
 
 const SAME_STORY_CRITERIA = {
-    true: "it reports the same event as the reference story, or a direct development or consequence of it",
+    true: "it reports the same specific event as the reference story",
     false: "it is about a different event, even if it shares the topic, place or people with the reference story",
 };
 
+const SAME_STORY_PROBABILITY = 0.7;
+
 const referenceOf = (group: IGroup): IReference => ({
-    title: group.summary?.title ?? group.entries[0].title,
+    title: group.entries[0].title,
     content: group.entries[0].content,
 });
 
@@ -119,13 +121,13 @@ export const makeStoryGrouper = ({
                     }
                     let match: IGroup | undefined;
                     for (const group of open) {
-                        if (await classifier.classify(entry, SAME_STORY_PROMPT, SAME_STORY_CRITERIA, referenceOf(group)) >= YES_PROBABILITY) {
+                        if (await classifier.classify(entry, SAME_STORY_PROMPT, SAME_STORY_CRITERIA, referenceOf(group)) >= SAME_STORY_PROBABILITY) {
                             match = group;
                             break;
                         }
                     }
                     const id = await groups.addToGroup(match?.id ?? null, entry);
-                    log.info("%s -> %s", progress, match ? `group ${id} "${match.summary?.title ?? match.entries[0].title}"` : `new group ${id}`);
+                    log.info("%s -> %s", progress, match ? `group ${id} "${match.entries[0].title}"` : `new group ${id}`);
                     const member = { entryId: entry.id, title: entry.title, url: entry.url, content: entry.content };
                     if (match) match.entries.push(member);
                     else open.unshift({ id, entries: [member], updatedAt: new Date(), summary: null, summarizedCount: 0 });
