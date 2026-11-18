@@ -119,4 +119,7 @@ export const b2 = {
         const [upload] = await b2.uploads();
         return items(upload);
     },
+
+    publishedGuids: async (): Promise<string[]> =>
+        (await b2.publishedItems()).map((i) => i.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1] ?? ''),
 };

@@ -166,7 +166,7 @@ export const makeSqliteGroupStore = (path: string): IGroupStore => {
         db.exec("alter table groups add column summarized_count integer not null default 0");
     }
     const newGroup = db.prepare("insert into groups default values");
-    const addEntry = db.prepare("insert or ignore into group_entries (entry_id, group_id, title, url, content) values (?, ?, ?, ?, ?)");
+    const addEntry = db.prepare("insert or ignore into group_entries (entry_id, group_id, title, url, content, added_at) values (?, ?, ?, ?, ?, strftime('%Y-%m-%d %H:%M:%f', 'now'))");
 
     return {
         listGroupsSince: async (hours) => {

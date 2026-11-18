@@ -15,7 +15,7 @@ const describe = (group: IGroup): string =>
 const toItem = (group: IGroup): string => `<item>
 <title>${escape(group.summary?.title ?? group.entries[0].title)}</title>
 <link>${escape(group.entries[0].url)}</link>
-<guid isPermaLink="false">group-${group.id}</guid>
+<guid isPermaLink="false">group-${group.entries[0].entryId}-${group.entries.length}</guid>
 <pubDate>${group.updatedAt.toUTCString()}</pubDate>
 <description><![CDATA[${describe(group)}]]></description>
 </item>`;

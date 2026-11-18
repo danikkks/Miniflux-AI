@@ -313,10 +313,54 @@ test('grouping: articles about different stories are published as separate feed 
 
     await app.runOnce(GROUPING_ENV);
 
-    const published = await b2.publishedItems();
-    assert.equal(published.length, 2);
-    const guids = published.map((i) => i.match(/<guid[^>]*>(.*?)<\/guid>/)?.[1]);
+    const guids = await b2.publishedGuids();
+    assert.equal(guids.length, 2);
     assert.equal(new Set(guids).size, 2);
+});
+
+test('grouping: a group that gets a new article is published under a new guid', async () => {
+    await givenGrouping([GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+    await app.runOnce(GROUPING_ENV);
+    await app.stop();
+    const [before] = await b2.publishedGuids();
+
+    await resetFakes();
+    await givenGrouping([GROUP_ENTRY_B]);
+    await givenDecisions('yes');
+    await app.runOnce(GROUPING_ENV);
+
+    const [item, ...others] = await b2.publishedItems();
+    assert.equal(others.length, 0);
+    assert.match(item, new RegExp(GROUP_ENTRY_A.url));
+    assert.match(item, new RegExp(GROUP_ENTRY_B.url));
+    assert.notEqual((await b2.publishedGuids())[0], before);
+});
+
+test('grouping: groups made after the database is wiped do not reuse guids', async () => {
+    await givenGrouping([GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+    await app.runOnce(GROUPING_ENV);
+    await app.stop();
+    const [before] = await b2.publishedGuids();
+
+    await unlink(DB_FILE);
+    await resetFakes();
+    await givenGrouping([GROUP_ENTRY_B]);
+    await givenDecisions('yes');
+    await app.runOnce(GROUPING_ENV);
+
+    assert.notEqual((await b2.publishedGuids())[0], before);
+});
+
+test('grouping: the article that started a group stays first when an older article joins it', async () => {
+    await givenGrouping([GROUP_ENTRY_B, GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+
+    await app.runOnce(GROUPING_ENV);
+
+    const [item] = await b2.publishedItems();
+    assert.match(item, new RegExp(`<link>${GROUP_ENTRY_B.url}</link>`));
 });
 
 test('grouping: grouped articles are marked as read in miniflux', async () => {
