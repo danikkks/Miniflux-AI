@@ -68,8 +68,8 @@ const classifyWithDecisionApi = async (
     throw new Error("unreachable");
 };
 
-export const makeAIClassifier = (ollamaBaseUrl: string | undefined, model: string): IAIClassifier => {
-    const client = new Ollama({ host: ollamaBaseUrl });
+export const makeAIClassifier = (ollamaBaseUrl: string | undefined, model: string, fetchWithRetry: typeof fetch): IAIClassifier => {
+    const client = new Ollama({ host: ollamaBaseUrl, fetch: fetchWithRetry });
     let decisionApiChecked = false;
 
     return {

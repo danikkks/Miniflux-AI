@@ -26,6 +26,7 @@ src/
     group-stories.ts    -- makeStoryGrouper(): group same-story entries, summarize, publish feed
     review-decisions.ts -- makeReviewService(): review queue and prompt-tweak text
   miniflux.ts       -- Miniflux REST API client
+  fetch-with-retry.ts -- fetch that retries network errors and 502/503/504 (1s, 2s, 4s), logging each retry; used by the Miniflux and Ollama clients
   ai-classifier.ts  -- IAIClassifier implementation (Ollama decision api)
   web-ui.ts         -- inbound adapter: htmx review UI (node:http), depends on IReviewService
   sqlite-database.ts -- IDecisionStore, IReviewStore and IGroupStore implementations (node:sqlite)

@@ -114,6 +114,27 @@ test('entry classified as "no" is marked as read', async () => {
     assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
 });
 
+test('filtering: miniflux calls are retried after a dropped connection', async () => {
+    await miniflux.hasUnread([ENTRY]);
+    await miniflux.dropsConnectionOnUnread(FEED);
+    await miniflux.dropsConnectionOnMarkAsRead();
+    await givenDecision('no');
+
+    await app.runOnce();
+
+    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id, ENTRY.id]);
+});
+
+test('filtering: miniflux calls are retried after a 503 response', async () => {
+    await miniflux.hasUnread([ENTRY]);
+    await miniflux.isUnavailableOnceOnMarkAsRead();
+    await givenDecision('no');
+
+    await app.runOnce();
+
+    assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id, ENTRY.id]);
+});
+
 const reviewRow = (decision: 'yes' | 'no', entry: typeof ENTRY) =>
     new RegExp(`class="badge ${decision}">${decision}</span>\\s*<a href="${entry.url}"[^>]*>${entry.title}</a>\\s*<small>${entry.feed.category.title}</small>`);
 
@@ -290,6 +311,22 @@ test('grouping: articles about the same story are published as one feed item', a
     assert.match(item, new RegExp(GROUP_ENTRY_B.url));
     const [upload] = await b2.uploads();
     assert.match(upload.headers['content-type'][0], /rss\+xml/);
+});
+
+test('grouping: a dropped connection to ollama or b2 does not fail the run', async () => {
+    await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await givenDecisions('yes');
+    await ollama.dropsConnectionOnDecide();
+    await ollama.dropsConnectionOnSummarize();
+    await b2.dropsConnectionOnUpload();
+
+    await app.runOnce(GROUPING_ENV);
+
+    const last = (await b2.uploads()).at(-1);
+    const upload = last?.body.xml ?? last?.body.string ?? '';
+    assert.match(upload, new RegExp(GROUP_ENTRY_A.url));
+    assert.match(upload, new RegExp(GROUP_ENTRY_B.url));
+    assert.deepEqual(await miniflux.markedAsRead(), [GROUP_ENTRY_A.id, GROUP_ENTRY_B.id]);
 });
 
 test('grouping: miniflux refreshes only the feed subscribed to the published file', async () => {

@@ -26,6 +26,15 @@ export const recorded = async (method?: string, path?: string): Promise<Recorded
 
 export const resetFakes = () => mock.reset();
 
+const once = (method: string, path: string, action: { httpError: object } | { httpResponse: object }) => mock.mockAnyResponse({
+    httpRequest: { method, path },
+    ...action,
+    priority: OVERRIDE + 1,
+    times: { remainingTimes: 1, unlimited: false },
+});
+
+const DROP = { httpError: { dropConnection: true } };
+
 export const miniflux = {
     hasCategories: (categories: Category[]) => mock.mockAnyResponse(json('GET', '/v1/categories', 200, categories)),
 
@@ -41,6 +50,12 @@ export const miniflux = {
         }
         await status('PUT', '/v1/entries', 204);
     },
+
+    dropsConnectionOnUnread: (feed: Feed) => once('GET', `/v1/feeds/${feed.id}/entries`, DROP),
+
+    dropsConnectionOnMarkAsRead: () => once('PUT', '/v1/entries', DROP),
+
+    isUnavailableOnceOnMarkAsRead: () => once('PUT', '/v1/entries', { httpResponse: { statusCode: 503 } }),
 
     failsToMarkAsRead: () => status('PUT', '/v1/entries', 500, OVERRIDE),
 
@@ -100,6 +115,10 @@ export const ollama = {
         priority: OVERRIDE,
     }),
 
+    dropsConnectionOnDecide: () => once('POST', '/v1/systemone', DROP),
+
+    dropsConnectionOnSummarize: () => once('POST', '/api/generate', DROP),
+
     decisionRequests: () => recorded('POST', '/v1/systemone'),
 
     generateRequests: () => recorded('POST', '/api/generate'),
@@ -112,6 +131,8 @@ const items = (upload: RecordedRequest): string[] =>
 
 export const b2 = {
     acceptsUploads: () => status('PUT', PUBLISHED_FEED_PATH, 200),
+
+    dropsConnectionOnUpload: () => once('PUT', PUBLISHED_FEED_PATH, DROP),
 
     uploads: () => recorded('PUT', PUBLISHED_FEED_PATH),
 

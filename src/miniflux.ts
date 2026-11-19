@@ -27,22 +27,23 @@ const toEntry = (e: MinifluxEntry): IEntry => ({
 export const makeMinifluxClient = (
     baseUrl: string,
     authToken: string,
+    fetchWithRetry: typeof fetch,
 ): IFeedReader & IEntryUpdater & IFeedRefresher => {
     const headers = () => new Headers({ "X-Auth-Token": authToken });
 
     return {
         getCategories: async () => {
-            const r = await fetch(`${baseUrl}/v1/categories`, { headers: headers() });
+            const r = await fetchWithRetry(`${baseUrl}/v1/categories`, { headers: headers() });
             return (await (r.json() as Promise<MinifluxCategory[]>)).map(toCategory);
         },
 
         getFeedsByCategory: async (categoryId) => {
-            const r = await fetch(`${baseUrl}/v1/categories/${categoryId}/feeds`, { headers: headers() });
+            const r = await fetchWithRetry(`${baseUrl}/v1/categories/${categoryId}/feeds`, { headers: headers() });
             return (await (r.json() as Promise<MinifluxFeed[]>)).map(toFeed);
         },
 
         getUnreadEntries: async (feedId) => {
-            const r = await fetch(
+            const r = await fetchWithRetry(
                 `${baseUrl}/v1/feeds/${feedId}/entries?status=unread&order=published_at&direction=asc&limit=100`,
                 { headers: headers() },
             );
@@ -51,7 +52,7 @@ export const makeMinifluxClient = (
         },
 
         markAsRead: async (entryIds) => {
-            const r = await fetch(`${baseUrl}/v1/entries`, {
+            const r = await fetchWithRetry(`${baseUrl}/v1/entries`, {
                 method: "PUT",
                 headers: headers(),
                 body: JSON.stringify({ status: "read", entry_ids: entryIds.map(Number) }),
@@ -60,13 +61,13 @@ export const makeMinifluxClient = (
         },
 
         listSubscribedFeeds: async () => {
-            const r = await fetch(`${baseUrl}/v1/feeds`, { headers: headers() });
+            const r = await fetchWithRetry(`${baseUrl}/v1/feeds`, { headers: headers() });
             return (await (r.json() as Promise<{ id: number; feed_url: string }[]>))
                 .map((f): ISubscribedFeed => ({ id: String(f.id), url: f.feed_url }));
         },
 
         refreshFeed: async (feedId) => {
-            const r = await fetch(`${baseUrl}/v1/feeds/${feedId}/refresh`, { method: "PUT", headers: headers() });
+            const r = await fetchWithRetry(`${baseUrl}/v1/feeds/${feedId}/refresh`, { method: "PUT", headers: headers() });
             if (!r.ok) throw new Error(`refreshing feed ${feedId} failed: ${r.status}`);
         },
     };

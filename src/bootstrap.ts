@@ -9,6 +9,7 @@ import { makeAISummarizer } from "./ai-summarizer.js";
 import { makeB2FeedPublisher } from "./b2-feed-publisher.js";
 import { startWebUi } from "./web-ui.js";
 import { makeLogs, type Logs } from "./logger.js";
+import { makeFetchWithRetry } from "./fetch-with-retry.js";
 import type { IProcessing, ProcessingStatus } from "./core/entities.js";
 
 const requireEnv = (name: string): string => {
@@ -77,11 +78,13 @@ const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL =
 const appLog = logs.logger("app");
 const sequential = process.env.RUN_SEQUENTIALLY === "true";
 const stepLog = (name: string) => logs.logger(name, sequential ? "processing" : name);
+const fetchWithRetry = makeFetchWithRetry(logs.logger("http"));
 const miniflux = makeMinifluxClient(
     requireEnv("MINIFLUX_URL"),
     requireEnv("MINIFLUX_AUTH_TOKEN"),
+    fetchWithRetry,
 );
-const classifier = makeAIClassifier(process.env.OLLAMA_BASE_URL, requireEnv("OLLAMA_MODEL"));
+const classifier = makeAIClassifier(process.env.OLLAMA_BASE_URL, requireEnv("OLLAMA_MODEL"), fetchWithRetry);
 const promptLoader = makePromptLoader(process.cwd());
 const databasePath = process.env.DATABASE_PATH || "miniflux-ai.db";
 const database = makeSqliteDatabase(databasePath);
@@ -100,7 +103,7 @@ if (groupingCategories.length > 0 && !groupingEnabled) {
 }
 if (groupingCategories.length > 0 && groupingEnabled) {
     const groups = makeSqliteGroupStore(databasePath);
-    const summarizer = makeAISummarizer(requireEnv("OLLAMA_BASE_URL"), requireEnv("OLLAMA_SUMMARY_MODEL"));
+    const summarizer = makeAISummarizer(requireEnv("OLLAMA_BASE_URL"), requireEnv("OLLAMA_SUMMARY_MODEL"), fetchWithRetry);
     const publisher = makeB2FeedPublisher({
         endpoint: requireEnv("B2_ENDPOINT"),
         region: requireEnv("B2_REGION"),

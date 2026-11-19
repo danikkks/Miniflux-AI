@@ -13,8 +13,8 @@ const buildPrompt = (group: IGroup): string => {
     return `The articles below are about the same news story. Write a neutral headline and a short description (2-3 sentences) of the story. Use the language of the articles. Answer with json: {"title": "...", "description": "..."}.\n\n${articles}`;
 };
 
-export const makeAISummarizer = (host: string, model: string): IGroupSummarizer => {
-    const client = new Ollama({ host });
+export const makeAISummarizer = (host: string, model: string, fetchWithRetry: typeof fetch): IGroupSummarizer => {
+    const client = new Ollama({ host, fetch: fetchWithRetry });
     return {
         summarize: async (group) => {
             const r = await client.generate({
