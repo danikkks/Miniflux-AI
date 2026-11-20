@@ -436,8 +436,8 @@ test('grouping: the same-story question carries the group\'s first article as a 
     const [sameStory] = (await ollama.decisionRequests())
         .filter((r) => JSON.stringify(r.body).includes('the reference story?'))
         .map((r) => r.body.json);
-    assert.match(sameStory.state, new RegExp(`Reference story:\\n${GROUP_ENTRY_A.title}\\n${GROUP_ENTRY_A.content}`));
-    assert.match(sameStory.state, new RegExp(`Article:\\n${GROUP_ENTRY_B.title}`));
+    assert.match(sameStory.state, new RegExp(`Reference story:\\nTitle: ${GROUP_ENTRY_A.title}\\nText: ${GROUP_ENTRY_A.content}`));
+    assert.match(sameStory.state, new RegExp(`Article:\\nTitle: ${GROUP_ENTRY_B.title}\\nText: ${GROUP_ENTRY_B.content}`));
 });
 
 test('grouping: a likely but not confident match starts a new group', async () => {
@@ -463,7 +463,7 @@ test('grouping: the generated group title does not replace the first article in 
     const [sameStory] = (await ollama.decisionRequests())
         .filter((r) => JSON.stringify(r.body).includes('the reference story?'))
         .map((r) => r.body.json);
-    assert.match(sameStory.state, new RegExp(`Reference story:\\n${GROUP_ENTRY_A.title}\\n`));
+    assert.match(sameStory.state, new RegExp(`Reference story:\\nTitle: ${GROUP_ENTRY_A.title}\\n`));
 });
 
 test('grouping and filtering run side by side', async () => {

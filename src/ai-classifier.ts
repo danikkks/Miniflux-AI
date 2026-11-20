@@ -37,10 +37,11 @@ const overflowTokenCount = (err: unknown): number | null => {
 };
 
 const stateOf = (entry: IEntry, reference?: IReference): string => {
-    const article = `${stripHtml(entry.title).result}\n${structurePreservingHtmlToText.turndown(entry.content)}`;
-    if (!reference) return article;
+    const title = stripHtml(entry.title).result;
+    const text = structurePreservingHtmlToText.turndown(entry.content);
+    if (!reference) return `${title}\n${text}`;
     const excerpt = structurePreservingHtmlToText.turndown(reference.content).slice(0, REFERENCE_EXCERPT_LENGTH);
-    return `Reference story:\n${stripHtml(reference.title).result}\n${excerpt}\n\nArticle:\n${article}`;
+    return `Reference story:\nTitle: ${stripHtml(reference.title).result}\nText: ${excerpt}\n\nArticle:\nTitle: ${title}\nText: ${text}`;
 };
 
 const supportsDecisionApi = async (client: Ollama, model: string): Promise<boolean> => {
