@@ -20,3 +20,4 @@ export const GROUP_SUB_CATEGORY = { id: 4, title: 'World News / Wire', user_id: 
 export const GROUP_SUB_FEED = { id: 13, category: GROUP_SUB_CATEGORY };
 export const GROUP_ENTRY_C = { id: 202, title: 'Quake rattles coast', url: 'http://example.com/quake-c', content: 'Wire report.', feed: GROUP_SUB_FEED };
 export const GROUP_DIGEST = { id: 203, title: 'Weekly roundup', url: 'http://example.com/digest', content: 'Many stories.', feed: GROUP_FEED };
+export const GROUP_JOB_AD = { id: 204, title: 'Content writer wanted', url: 'http://example.com/job', content: 'We are hiring.', feed: GROUP_FEED };

@@ -1,4 +1,4 @@
-import { parentCategory, YES_PROBABILITY } from "./entities.js";
+import { NO_PROBABILITY, parentCategory, YES_PROBABILITY } from "./entities.js";
 import type {
     IAIClassifier,
     IReference,
@@ -32,6 +32,13 @@ const DIGEST_PROMPT = "Is the article below a digest?";
 const DIGEST_CRITERIA = {
     true: "it covers several separate news stories, each with its own body text",
     false: "it covers a single story; \"Read also\" and related-links sections are not stories",
+};
+
+const NEWS_EVENT_PROMPT = "Does the article report a specific news event?";
+
+const NEWS_EVENT_CRITERIA = {
+    true: "it reports something that happened or was said at a specific time, such as an attack, a decision or a statement",
+    false: "it is not news about an event, such as a job ad, a promotion, a newsletter sign-up or a page about the publisher",
 };
 
 export type StoryGrouperDeps = {
@@ -117,6 +124,11 @@ export const makeStoryGrouper = ({
                     if (await classifier.classify(entry, DIGEST_PROMPT, DIGEST_CRITERIA) >= YES_PROBABILITY) {
                         digestIds.push(entry.id);
                         log.info("%s -> digest, skipped", progress);
+                        continue;
+                    }
+                    if (await classifier.classify(entry, NEWS_EVENT_PROMPT, NEWS_EVENT_CRITERIA) < NO_PROBABILITY) {
+                        await entryUpdater.markAsRead([entry.id]);
+                        log.info("%s -> not a news event, marked as read", progress);
                         continue;
                     }
                     let match: IGroup | undefined;

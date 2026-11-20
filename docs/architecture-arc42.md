@@ -190,6 +190,11 @@ sequenceDiagram
             alt digest
                 C-->>G: yes, skip entry
             else single story
+                G->>C: is it a news event?
+                opt not news
+                    C-->>G: no
+                    G->>M: mark as read, skip entry
+                end
                 loop per open group, until a match
                     G->>C: same story?
                 end
