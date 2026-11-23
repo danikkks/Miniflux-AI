@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { ENGLISH_TEMPLATES } from "./log-templates.js";
 import type { ILogger, IProcessing, IReviewItem, IReviewPrompt, IReviewService, ProcessingStatus } from "./core/entities.js";
 
 const ESCAPES: Record<string, string> = {
@@ -91,7 +92,7 @@ const page = (step: string, processControl: string): string => `<!doctype html>
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Miniflux-AI review</title>
+    <title>Miniflux-AI</title>
     <script src="https://unpkg.com/htmx.org@2.0.4"></script>
     <style>
         body { font-family: sans-serif; max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }
@@ -102,6 +103,10 @@ const page = (step: string, processControl: string): string => `<!doctype html>
         textarea { width: 100%; font-family: monospace; }
         #error { color: firebrick; }
         header { display: flex; justify-content: space-between; align-items: center; }
+        .tab[aria-selected="true"] { font-weight: bold; }
+        #progress table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.8rem; }
+        #progress td { padding: 0.1rem 0.5rem; vertical-align: top; white-space: pre-wrap; }
+        #progress .ERROR { color: firebrick; }
         .toast { position: fixed; bottom: 1rem; right: 1rem; padding: 0.75rem 1rem; border-radius: 0.3rem; background: #333; color: white; animation: fade-out 5s forwards; }
         @keyframes fade-out { 80% { opacity: 1; } 100% { opacity: 0; visibility: hidden; } }
     </style>
@@ -110,16 +115,65 @@ const page = (step: string, processControl: string): string => `<!doctype html>
         document.addEventListener("htmx:beforeRequest", () => showError(""));
         document.addEventListener("htmx:responseError", (e) => showError(e.detail.xhr.responseText || "request failed"));
         document.addEventListener("htmx:sendError", () => showError("server unreachable"));
+        document.addEventListener("click", (e) => {
+            const tab = e.target.closest(".tab");
+            if (!tab) return;
+            document.querySelectorAll(".tab").forEach((t) => t.setAttribute("aria-selected", t === tab));
+            document.querySelectorAll(".panel").forEach((p) => { p.hidden = p.id !== tab.dataset.panel; });
+            void showProgress();
+        });
+        const element = (tag, text, className) => {
+            const e = document.createElement(tag);
+            e.textContent = text;
+            if (className) e.className = className;
+            return e;
+        };
+        const TEMPLATES = ${JSON.stringify(ENGLISH_TEMPLATES)};
+        const describe = (r) =>
+            (TEMPLATES[r.type] ?? r.type).replace(/\\{(\\w+)\\}/g, (_, name) => r[name]) + (r.error ? \`\\n\${r.error}\` : "");
+        const recordRow = (r) => {
+            const row = element("tr", "", r.level);
+            row.append(element("td", new Date(r.time).toLocaleTimeString()), element("td", r.level), element("td", r.process), element("td", describe(r)));
+            return row;
+        };
+        const runView = (run) => {
+            const section = element("section", "");
+            const table = element("table", "");
+            table.append(...run.records.map(recordRow));
+            section.append(element("h3", run.name), run.records.length === 0 ? element("p", "not run yet") : table);
+            return section;
+        };
+        let progressFailed = false;
+        const showProgress = async () => {
+            const view = document.getElementById("progress");
+            if (view.hidden) return;
+            try {
+                const res = await fetch("/progress.json");
+                if (!res.ok) throw new Error();
+                view.replaceChildren(...(await res.json()).map(runView));
+                if (progressFailed) showError("");
+                progressFailed = false;
+            } catch {
+                progressFailed = true;
+                showError("progress unavailable, retrying");
+            }
+        };
+        setInterval(showProgress, 3000);
     </script>
 </head>
 <body>
     <header>
-        <h1>Decision review</h1>
+        <h1>Miniflux-AI</h1>
         ${processControl}
     </header>
+    <nav>
+        <button class="tab" aria-selected="true" data-panel="step">review</button>
+        <button class="tab" aria-selected="false" data-panel="progress">progress</button>
+    </nav>
     <div id="toast"></div>
     <p id="error" role="alert"></p>
-    <div id="step">${step}</div>
+    <div id="step" class="panel">${step}</div>
+    <div id="progress" class="panel" hidden>loading...</div>
 </body>
 </html>`;
 
@@ -143,6 +197,11 @@ export const startWebUi = (service: IReviewService, processing: IProcessing, por
             }
             if (req.method === "GET" && req.url === "/pending") {
                 send(res, 200, pendingStep(await service.listPending()));
+                return;
+            }
+            if (req.method === "GET" && req.url === "/progress.json") {
+                res.writeHead(200, { "content-type": "application/json" });
+                res.end(JSON.stringify(processing.progress()));
                 return;
             }
             if (req.method === "POST" && req.url === "/review") {

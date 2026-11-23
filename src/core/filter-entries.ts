@@ -8,8 +8,8 @@ import type {
     IEntry,
     IEntryUpdater,
     IFeedReader,
-    ILogger,
     IPromptLoader,
+    IRunLogger,
 } from "./entities.js";
 
 const filterCategoriesWithPrompts = (
@@ -26,7 +26,7 @@ export type EntryFilterDeps = {
     classifier: IAIClassifier;
     entryUpdater: IEntryUpdater;
     decisionStore: IDecisionStore;
-    log: ILogger;
+    log: IRunLogger;
 };
 
 export const makeEntryFilter = ({
@@ -42,7 +42,7 @@ export const makeEntryFilter = ({
     const classifyOrSkip = async (
         entry: IEntry,
         prompts: ICustomPrompt[],
-        progress: string,
+        progress: { index: number; total: number },
     ): Promise<IDecision | null> => {
         const prompt = findPromptForCategory(entry.feed.category.title, prompts);
         if (!prompt) throw new Error(`no prompt for category "${entry.feed.category.title}"`);
@@ -50,18 +50,18 @@ export const makeEntryFilter = ({
         try {
             const probability = await classifier.classify(entry, prompt.content);
             const decision = probability < NO_PROBABILITY ? "no" : "yes";
-            const verdict = decision === "no" ? "irrelevant" : probability >= YES_PROBABILITY ? "relevant" : "unsure, left unread";
-            log.info("%s entry %s \"%s\" -> %s", progress, entry.id, entry.title, verdict);
+            const type = decision === "no" ? "entry-irrelevant" : probability >= YES_PROBABILITY ? "entry-relevant" : "entry-unsure";
+            log.info({ type, ...progress, entryId: entry.id, title: entry.title });
             return { entry, decision };
         } catch (err) {
-            log.error("%s entry %s \"%s\" failed, retrying next run", progress, entry.id, entry.title, err);
+            log.error({ type: "entry-failed", ...progress, entryId: entry.id, title: entry.title }, err);
             return null;
         }
     };
 
     return async () => {
         const startedAt = Date.now();
-        log.info("run started");
+        log.info({ type: "run-started" });
 
         const prompts = await promptLoader.load();
         log.debug("custom prompts", prompts);
@@ -77,10 +77,7 @@ export const makeEntryFilter = ({
         ).flat();
         log.debug("feeds", feeds);
 
-        log.info(
-            "%d prompts, %d categories, %d feeds",
-            prompts.length, relevantCategories.length, feeds.length,
-        );
+        log.info({ type: "filter-scope", prompts: prompts.length, categories: relevantCategories.length, feeds: feeds.length });
 
         const handled = new Set<string>();
         const fetchUnprocessed = async (): Promise<IEntry[]> => {
@@ -95,10 +92,10 @@ export const makeEntryFilter = ({
         let irrelevant = 0;
         let failed = 0;
         for (let pending = await fetchUnprocessed(); pending.length > 0; pending = await fetchUnprocessed()) {
-            log.info("%d to classify", pending.length);
+            log.info({ type: "to-classify", count: pending.length });
             for (const [i, entry] of pending.entries()) {
                 handled.add(entry.id);
-                const decision = await classifyOrSkip(entry, prompts, `[${i + 1}/${pending.length}]`);
+                const decision = await classifyOrSkip(entry, prompts, { index: i + 1, total: pending.length });
                 if (!decision) {
                     failed++;
                     continue;
@@ -115,9 +112,6 @@ export const makeEntryFilter = ({
                 processedIds.push(entry.id);
             }
         }
-        log.info(
-            "run finished in %ss: %d relevant, %d irrelevant marked as read, %d failed",
-            ((Date.now() - startedAt) / 1000).toFixed(1), relevant, irrelevant, failed,
-        );
+        log.info({ type: "filter-finished", seconds: Math.round((Date.now() - startedAt) / 100) / 10, relevant, irrelevant, failed });
     };
 };

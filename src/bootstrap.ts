@@ -21,7 +21,7 @@ const requireEnv = (name: string): string => {
 type Step = { name: string; run: () => Promise<void> };
 
 const trackRuns = (logs: Logs, name: string, task: () => Promise<void>): IProcessing => {
-    const log = logs.logger(name);
+    const log = logs.runLogger(name);
     let running: Promise<void> | null = null;
     let lastFailed: boolean | null = null;
     const start = () => {
@@ -33,7 +33,7 @@ const trackRuns = (logs: Logs, name: string, task: () => Promise<void>): IProces
             .then(
                 () => { lastFailed = false; },
                 (err: unknown) => {
-                    log.error("run failed", err);
+                    log.error({ type: "run-failed" }, err);
                     lastFailed = true;
                 },
             )
@@ -43,6 +43,7 @@ const trackRuns = (logs: Logs, name: string, task: () => Promise<void>): IProces
             if (lastFailed === null) return "idle";
             return lastFailed ? "failed" : "completed";
         },
+        progress: () => [{ name, records: logs.records(name) }],
     };
 };
 
@@ -56,6 +57,7 @@ const trackInParallel = (runs: IProcessing[]): IProcessing => ({
         const statuses = runs.map((r) => r.status());
         return STATUS_PRECEDENCE.find((s) => statuses.includes(s)) ?? "idle";
     },
+    progress: () => runs.flatMap((r) => r.progress()),
 });
 
 const runInOrder = async (steps: Step[]): Promise<void> => {
@@ -77,7 +79,7 @@ process.on("SIGTERM", () => process.exit(0));
 const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug");
 const appLog = logs.logger("app");
 const sequential = process.env.RUN_SEQUENTIALLY === "true";
-const stepLog = (name: string) => logs.logger(name, sequential ? "processing" : name);
+const stepLog = (name: string) => logs.runLogger(name, sequential ? "processing" : name);
 const fetchWithRetry = makeFetchWithRetry(logs.logger("http"));
 const miniflux = makeMinifluxClient(
     requireEnv("MINIFLUX_URL"),

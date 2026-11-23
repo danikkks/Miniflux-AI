@@ -33,7 +33,8 @@ src/
   ai-summarizer.ts  -- IGroupSummarizer implementation (Ollama generate)
   b2-feed-publisher.ts -- IFeedPublisher implementation (builds the RSS xml, uploads it to Backblaze B2 via S3 api)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
-  logger.ts         -- ILogger implementation (stdout + one log file per run, one process prefix per logger)
+  log-templates.ts  -- english text per RunEvent type with {field} placeholders (type-checked against the event's fields), used by the log files and sent to the progress tab
+  logger.ts         -- ILogger and IRunLogger implementations (stdout + one log file per run, one process prefix per logger); IRunLogger takes typed RunEvents, writes their text and keeps them for the progress tab
   bootstrap.ts      -- entry point: wires providers, serves the review ui that triggers runs
 test/
   integration.test.ts  -- black-box integration tests
@@ -58,7 +59,7 @@ When `GROUPING_CATEGORIES` is set (and `OLLAMA_SUMMARY_MODEL` and all `B2_*` var
 
 ### Review UI
 
-`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user marks each one they checked as correct or wrong (unmarked rows stay unreviewed). Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. A "keep newest N" input above the list discards older decisions without a verdict (`POST /discard`, which also echoes back unsubmitted picks): they leave the queue with no verdict, so they never reach the prompt history; rows that already have a verdict are kept and do not count toward N. The user applies the result to the prompt file manually. A "process now" button (`POST /process`) is the only way to start processing: it runs grouping and filtering once (one after another with `RUN_SEQUENTIALLY=true`, otherwise in parallel); a run already in progress is joined rather than started twice. The run starts in the background, the button turns into a disabled "processing..." one that polls `GET /process` every 3s, and once nothing is running it turns back and a completion (or failure) toast shows. A page loaded during a run starts in the "processing..." state. No toast shows before the first run of the process finishes.
+`web-ui.ts` serves an htmx UI on `WEB_PORT`. Step 1 lists all unreviewed decisions; the user marks each one they checked as correct or wrong (unmarked rows stay unreviewed). Step 2 stores verdicts (`correct`/`wrong`) and shows, per parent category ("Parent / Child" titles roll up into "Parent"), a copyable prompt built from the last 1000 verdicts in that parent category and its subcategories (not only the just-reviewed batch); pressing its copy button sets the `reviewed` flag on those decisions (until then they stay in the list with their verdicts pre-ticked) asking a stronger model to improve `custom-prompt-<category>.md` based on the reviewed decisions. A "keep newest N" input above the list discards older decisions without a verdict (`POST /discard`, which also echoes back unsubmitted picks): they leave the queue with no verdict, so they never reach the prompt history; rows that already have a verdict are kept and do not count toward N. The user applies the result to the prompt file manually. A "process now" button (`POST /process`) is the only way to start processing: it runs grouping and filtering once (one after another with `RUN_SEQUENTIALLY=true`, otherwise in parallel); a run already in progress is joined rather than started twice. The run starts in the background, the button turns into a disabled "processing..." one that polls `GET /process` every 3s, and once nothing is running it turns back and a completion (or failure) toast shows. A page loaded during a run starts in the "processing..." state. No toast shows before the first run of the process finishes. Two tabs, "review" and "progress", only show or hide their panels (nothing reloads, so unsubmitted picks stay). The progress panel shows the latest run of each process (`filtering` and `grouping`, or `processing` with `RUN_SEQUENTIALLY=true`) as a table; while it is visible the browser polls `GET /progress.json` every 3s (a failed poll shows an error until one succeeds) and fills the text from typed records (`RunEvent` `type` plus its fields, no message text) with the templates the page carries, so the UI can be localized. The newest 1000 records per run are kept in memory only.
 
 ### Interfaces (`core/entities.ts`)
 
@@ -74,8 +75,9 @@ When `GROUPING_CATEGORIES` is set (and `OLLAMA_SUMMARY_MODEL` and all `B2_*` var
 | `IGroupSummarizer` | `makeAISummarizer()` in `ai-summarizer.ts` |
 | `IFeedPublisher` | `makeB2FeedPublisher()` in `b2-feed-publisher.ts` |
 | `IPromptLoader` | `promptLoader` in `prompt-loader.ts` |
-| `ILogger` | `makeLogs()` in `logger.ts`, one per process (`filtering`, `grouping`, `web`, `app`) |
-| `IProcessing` | `trackRuns()` / `trackInParallel()` in `bootstrap.ts`, consumed by `web-ui.ts` |
+| `ILogger` | `makeLogs()` in `logger.ts`, one per process (`web`, `app`, `http`) |
+| `IRunLogger` | `makeLogs()` in `logger.ts`, one per processing step (`filtering`, `grouping`), consumed by the use cases |
+| `IProcessing` | `trackRuns()` / `trackInParallel()` in `bootstrap.ts` (status and run progress from `logger.ts`), consumed by `web-ui.ts` |
 
 ### Classification
 

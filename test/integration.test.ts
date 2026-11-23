@@ -48,6 +48,10 @@ const postForm = (path: string, params: string[][]) =>
 
 const page = async (path = '') => (await fetch(`${WEB}${path}`)).text();
 
+type RunProgress = { name: string; records: Record<string, unknown>[] };
+
+const progress = async () => (await fetch(`${WEB}/progress.json`)).json() as Promise<RunProgress[]>;
+
 const givenGrouping = async (entries: Parameters<typeof miniflux.hasUnread>[0], subscriptions: { id: number; feed_url: string }[] = []) => {
     await miniflux.hasUnread(entries);
     await miniflux.hasSubscriptions(subscriptions);
@@ -730,4 +734,67 @@ test('review ui: processing started from the ui runs in the background and repor
 
     assert.match(await page('/process'), /process now/);
     assert.deepEqual(await miniflux.markedAsRead(), [ENTRY.id]);
+});
+
+test('review ui: progress lists the typed log records of the last run', async () => {
+    await miniflux.hasUnread([ENTRY]);
+    await givenDecision('no');
+    await app.start();
+
+    assert.deepEqual(await progress(), [{ name: 'filtering', records: [] }]);
+    await app.processNow();
+    await app.runFinished();
+
+    const [run] = await progress();
+    assert.equal(run.name, 'filtering');
+    assert.deepEqual(run.records.map((r) => r.type), ['run-started', 'filter-scope', 'to-classify', 'entry-irrelevant', 'filter-finished']);
+    const { time, ...classified } = run.records[3];
+    assert.ok(time);
+    assert.deepEqual(classified, {
+        type: 'entry-irrelevant', level: 'INFO', process: 'filtering',
+        index: 1, total: 1, entryId: String(ENTRY.id), title: ENTRY.title,
+    });
+});
+
+test('review ui: progress lists the grouping records next to the filtering ones', async () => {
+    await givenGrouping([GROUP_ENTRY_A, GROUP_ENTRY_B]);
+    await givenDecisions('yes');
+
+    await app.runOnce(GROUPING_ENV);
+
+    const [grouping, filtering] = await progress();
+    assert.equal(grouping.name, 'grouping');
+    assert.equal(filtering.name, 'filtering');
+    assert.deepEqual(grouping.records.map((r) => r.type), [
+        'run-started', 'group-scope', 'to-group', 'group-started', 'entry-grouped',
+        'summarizing', 'group-summarized', 'feed-published', 'feeds-refreshed', 'group-finished',
+    ]);
+});
+
+test('review ui: progress of a sequential run is one run with both processes', async () => {
+    await givenGrouping([GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+
+    await app.runOnce({ ...GROUPING_ENV, RUN_SEQUENTIALLY: 'true' });
+
+    const [run, ...others] = await progress();
+    assert.equal(others.length, 0);
+    assert.equal(run.name, 'processing');
+    assert.deepEqual([...new Set(run.records.map((r) => r.process))], ['grouping', 'filtering']);
+});
+
+test('review ui: progress of a failed run ends with the run-failed record and its error', async () => {
+    await givenGrouping([GROUP_ENTRY_A]);
+    await miniflux.listsUnreadOnlyOnce([GROUP_ENTRY_A]);
+    await givenDecisions('yes');
+
+    await app.start(GROUPING_ENV);
+    await app.processNow();
+    await app.runFinished('failed');
+
+    const [grouping] = await progress();
+    const [last] = grouping.records.slice(-1);
+    assert.equal(last.type, 'run-failed');
+    assert.equal(last.level, 'ERROR');
+    assert.match(String(last.error), /grouping stopped early/);
 });

@@ -157,9 +157,52 @@ export interface ILogger {
 
 export type ProcessingStatus = "idle" | "running" | "completed" | "failed";
 
+type EntryProgress = { index: number; total: number; entryId: string; title: string };
+
+type GroupProgress = { index: number; total: number; groupId: string };
+
+export type RunEvent =
+    | { type: "run-started" }
+    | { type: "run-failed" }
+    | { type: "filter-scope"; prompts: number; categories: number; feeds: number }
+    | { type: "to-classify"; count: number }
+    | ({ type: "entry-relevant" | "entry-irrelevant" | "entry-unsure" } & EntryProgress)
+    | ({ type: "entry-failed" } & EntryProgress)
+    | { type: "filter-finished"; seconds: number; relevant: number; irrelevant: number; failed: number }
+    | { type: "group-scope"; categories: number; feeds: number; openGroups: number }
+    | { type: "stale-marked-read"; count: number }
+    | { type: "stale-mark-failed" }
+    | { type: "fetch-failed" }
+    | { type: "to-group"; count: number }
+    | ({ type: "entry-digest" } & EntryProgress)
+    | ({ type: "entry-not-news" } & EntryProgress)
+    | ({ type: "entry-grouped"; groupId: string; groupTitle: string } & EntryProgress)
+    | ({ type: "group-started"; groupId: string } & EntryProgress)
+    | { type: "summarizing"; count: number }
+    | ({ type: "group-summarized"; summaryTitle: string } & GroupProgress)
+    | ({ type: "summary-failed" } & GroupProgress)
+    | { type: "feed-published"; groups: number }
+    | { type: "feeds-refreshed"; count: number }
+    | { type: "feed-unchanged" }
+    | { type: "group-finished"; seconds: number; grouped: number; failed: number };
+
+export interface IRunLogger {
+    info(event: RunEvent): void;
+    error(event: RunEvent, err: unknown): void;
+    debug(message: string, ...details: unknown[]): void;
+}
+
+export type RunLogRecord = RunEvent & { time: string; level: "INFO" | "ERROR"; process: string; error?: string };
+
+export interface IRunProgress {
+    name: string;
+    records: RunLogRecord[];
+}
+
 export interface IProcessing {
     run(): Promise<void>;
     status(): ProcessingStatus;
+    progress(): IRunProgress[];
 }
 
 export const findPromptForCategory = (
