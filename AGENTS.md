@@ -33,7 +33,7 @@ src/
   ai-summarizer.ts  -- IGroupSummarizer implementation (Ollama generate)
   b2-feed-publisher.ts -- IFeedPublisher implementation (builds the RSS xml, uploads it to Backblaze B2 via S3 api)
   prompt-loader.ts  -- IPromptLoader implementation (reads custom-prompt-*.md)
-  log-templates.ts  -- english text per RunEvent type with {field} placeholders (type-checked against the event's fields), used by the log files and sent to the progress tab
+  log-templates.ts  -- english text per RunEvent type with {field} placeholders (type-checked against the event's fields); `bootstrap.ts` passes them to the logger (log files) and the web ui (progress tab)
   logger.ts         -- ILogger and IRunLogger implementations (stdout + one log file per run, one process prefix per logger); IRunLogger takes typed RunEvents, writes their text and keeps them for the progress tab
   bootstrap.ts      -- entry point: wires providers, serves the review ui that triggers runs
 test/

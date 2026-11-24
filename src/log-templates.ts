@@ -37,6 +37,3 @@ const ENGLISH = {
 } as const;
 
 export const ENGLISH_TEMPLATES: Checked<typeof ENGLISH> = ENGLISH;
-
-export const describe = (event: RunEvent): string =>
-    ENGLISH_TEMPLATES[event.type].replace(/\{(\w+)\}/g, (_, name: string) => String((event as Record<string, unknown>)[name]));

@@ -1,8 +1,7 @@
 import { appendFileSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { formatWithOptions } from "node:util";
-import type { ILogger, IRunLogger, RunLogRecord } from "./core/entities.js";
-import { describe } from "./log-templates.js";
+import type { ILogger, IRunLogger, RunEvent, RunEventTemplates, RunLogRecord } from "./core/entities.js";
 
 type Level = "INFO" | "DEBUG" | "ERROR";
 
@@ -11,6 +10,9 @@ const KEPT_RUNS = 10;
 const KEPT_RECORDS = 1000;
 
 const INSPECT = { depth: null, maxArrayLength: null, maxStringLength: null, breakLength: 120 };
+
+const describeEvent = (templates: RunEventTemplates, event: RunEvent): string =>
+    templates[event.type].replace(/\{(\w+)\}/g, (_, name: string) => String((event as Record<string, unknown>)[name]));
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -23,7 +25,7 @@ export type Logs = {
     records(run: string): RunLogRecord[];
 };
 
-export const makeLogs = (dir: string, debug: boolean): Logs => {
+export const makeLogs = (dir: string, debug: boolean, templates: RunEventTemplates): Logs => {
     mkdirSync(dir, { recursive: true });
     const runFiles = new Map<string, string>();
     const runRecords = new Map<string, RunLogRecord[]>();
@@ -54,11 +56,11 @@ export const makeLogs = (dir: string, debug: boolean): Logs => {
         }),
         runLogger: (process, run = process) => ({
             info: (event) => {
-                write("INFO", process, run, describe(event), []);
+                write("INFO", process, run, describeEvent(templates, event), []);
                 keep(run, { ...event, time: new Date().toISOString(), level: "INFO", process });
             },
             error: (event, err) => {
-                write("ERROR", process, run, describe(event), [err]);
+                write("ERROR", process, run, describeEvent(templates, event), [err]);
                 keep(run, { ...event, time: new Date().toISOString(), level: "ERROR", process, error: errorText(err) });
             },
             debug: (message, ...details) => {

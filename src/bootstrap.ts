@@ -9,6 +9,7 @@ import { makeAISummarizer } from "./ai-summarizer.js";
 import { makeB2FeedPublisher } from "./b2-feed-publisher.js";
 import { startWebUi } from "./web-ui.js";
 import { makeLogs, type Logs } from "./logger.js";
+import { ENGLISH_TEMPLATES } from "./log-templates.js";
 import { makeFetchWithRetry } from "./fetch-with-retry.js";
 import type { IProcessing, ProcessingStatus } from "./core/entities.js";
 
@@ -76,7 +77,7 @@ const runInOrder = async (steps: Step[]): Promise<void> => {
 
 process.on("SIGTERM", () => process.exit(0));
 
-const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug");
+const logs = makeLogs(process.env.LOG_DIR || "logs", process.env.LOGGING_LEVEL === "debug", ENGLISH_TEMPLATES);
 const appLog = logs.logger("app");
 const sequential = process.env.RUN_SEQUENTIALLY === "true";
 const stepLog = (name: string) => logs.runLogger(name, sequential ? "processing" : name);
@@ -146,6 +147,7 @@ const port = parseInt(process.env.WEB_PORT || "3000");
 startWebUi(
     makeReviewService(database, promptLoader),
     trackInParallel(runs),
+    ENGLISH_TEMPLATES,
     port,
     logs.logger("web"),
 );

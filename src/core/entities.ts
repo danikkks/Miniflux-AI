@@ -186,6 +186,8 @@ export type RunEvent =
     | { type: "feed-unchanged" }
     | { type: "group-finished"; seconds: number; grouped: number; failed: number };
 
+export type RunEventTemplates = Record<RunEvent["type"], string>;
+
 export interface IRunLogger {
     info(event: RunEvent): void;
     error(event: RunEvent, err: unknown): void;

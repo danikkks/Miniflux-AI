@@ -1,7 +1,6 @@
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { ENGLISH_TEMPLATES } from "./log-templates.js";
-import type { ILogger, IProcessing, IReviewItem, IReviewPrompt, IReviewService, ProcessingStatus } from "./core/entities.js";
+import type { ILogger, IProcessing, IReviewItem, IReviewPrompt, IReviewService, ProcessingStatus, RunEventTemplates } from "./core/entities.js";
 
 const ESCAPES: Record<string, string> = {
     "&": "&amp;",
@@ -88,7 +87,7 @@ const PROCESS_CONTROLS: Record<ProcessingStatus, string> = {
     failed: PROCESS_BUTTON + toast("processing failed, see logs"),
 };
 
-const page = (step: string, processControl: string): string => `<!doctype html>
+const page = (step: string, processControl: string, templates: RunEventTemplates): string => `<!doctype html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -128,7 +127,7 @@ const page = (step: string, processControl: string): string => `<!doctype html>
             if (className) e.className = className;
             return e;
         };
-        const TEMPLATES = ${JSON.stringify(ENGLISH_TEMPLATES)};
+        const TEMPLATES = ${JSON.stringify(templates)};
         const describe = (r) =>
             (TEMPLATES[r.type] ?? r.type).replace(/\\{(\\w+)\\}/g, (_, name) => r[name]) + (r.error ? \`\\n\${r.error}\` : "");
         const recordRow = (r) => {
@@ -188,11 +187,11 @@ const send = (res: ServerResponse, status: number, html: string): void => {
     res.end(html);
 };
 
-export const startWebUi = (service: IReviewService, processing: IProcessing, port: number, log: ILogger) => {
+export const startWebUi = (service: IReviewService, processing: IProcessing, templates: RunEventTemplates, port: number, log: ILogger) => {
     const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
         try {
             if (req.method === "GET" && req.url === "/") {
-                send(res, 200, page(pendingStep(await service.listPending()), processing.status() === "running" ? PROCESSING_BUTTON : PROCESS_BUTTON));
+                send(res, 200, page(pendingStep(await service.listPending()), processing.status() === "running" ? PROCESSING_BUTTON : PROCESS_BUTTON, templates));
                 return;
             }
             if (req.method === "GET" && req.url === "/pending") {
